@@ -1,0 +1,26 @@
+﻿# Python
+codelens/backend/.venv/
+**/__pycache__/
+*.pyc
+*.pyo
+
+# Node
+**/node_modules/
+**/dist/
+
+# Generated indexes / ML artifacts
+codelens/indexes/
+codelens/results/
+
+# Environment variables
+.env
+.env.*
+!.env.example
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db

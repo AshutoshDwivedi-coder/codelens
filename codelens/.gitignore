@@ -1,0 +1,29 @@
+@"
+# Python
+codelens/backend/.venv/
+codelens/backend/__pycache__/
+**/__pycache__/
+*.pyc
+
+# Environment variables
+.env
+.env.*
+!.env.example
+
+# Node
+codelens/frontend/node_modules/
+node_modules/
+
+# Build files
+dist/
+build/
+.next/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+"@ | Out-File -Encoding utf8 .gitignore
