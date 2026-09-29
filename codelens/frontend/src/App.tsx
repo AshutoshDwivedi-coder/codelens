@@ -398,7 +398,7 @@ export function App() {
                 </button>
               ))}
             </div>
-            {results[activeResultIndex] && <CodeCard key={results[activeResultIndex].chunk_id} result={results[activeResultIndex]} rank={activeResultIndex + 1} onOpenHistory={(res) => setHistoryResult(res)} />}
+            {results[activeResultIndex] && <CodeCard key={results[activeResultIndex].chunk_id} result={results[activeResultIndex]} rank={activeResultIndex + 1} query={query} onOpenHistory={(res) => setHistoryResult(res)} />}
           </div>
         )}
 

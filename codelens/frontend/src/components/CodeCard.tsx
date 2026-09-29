@@ -32,10 +32,13 @@ function highlightLine(line: string) {
 interface CodeCardProps {
   result: SearchResult;
   rank: number;
+  query: string;
   onOpenHistory: (result: SearchResult) => void;
 }
 
-export const CodeCard: React.FC<CodeCardProps> = ({ result, rank, onOpenHistory }) => {
+const QUERY_STOP_WORDS = new Set(['where', 'what', 'when', 'which', 'who', 'how', 'does', 'are', 'the', 'and', 'for', 'from', 'with', 'this', 'that', 'into', 'implemented', 'implementation', 'codebase', 'code', 'show', 'find']);
+
+export const CodeCard: React.FC<CodeCardProps> = ({ result, rank, query = '', onOpenHistory }) => {
   const [copied, setCopied] = useState(false);
   const [viewMode, setViewMode] = useState<'plain' | 'code'>('code');
   const [showScoreDetails, setShowScoreDetails] = useState(false);
@@ -48,7 +51,18 @@ export const CodeCard: React.FC<CodeCardProps> = ({ result, rank, onOpenHistory 
   };
 
   const lines = (result.content || result.code || '').split('\n');
-  const relevanceText = result.docstring || (result.symbol_name ? `${result.symbol_name} is the closest matching symbol in this snippet.` : `Relevant code in ${result.file_path}.`);
+  const queryTerms = Array.from(new Set((query.toLowerCase().match(/[a-z0-9_]+/g) || [])
+    .filter((term) => term.length > 2 && !QUERY_STOP_WORDS.has(term))));
+  const searchableText = `${result.content || result.code || ''} ${result.docstring || ''} ${result.symbol_name || ''} ${result.file_path || ''}`.toLowerCase();
+  const matchedTerms = queryTerms.filter((term) => searchableText.includes(term)).slice(0, 5);
+  const queryFocus = queryTerms.slice(0, 4).join(', ') || 'your question';
+  const queryLabel = query.trim() || 'your search';
+  const firstDocLine = result.docstring?.trim().split('\n').find(Boolean)?.replace(/^['"\s]+|['"\s]+$/g, '');
+  const relevanceText = firstDocLine
+    ? `Your question focuses on ${queryFocus}. The ${result.symbol_type || 'code'}${result.symbol_name ? ` “${result.symbol_name}”` : ''} is documented as: ${firstDocLine}`
+    : matchedTerms.length
+      ? `Your question focuses on ${queryFocus}. This snippet contains references to ${matchedTerms.join(', ')}, which connect it to your question. It is in ${result.file_path}, lines ${result.start_line}–${result.end_line}; review the code below to see how those references are used.`
+      : `This snippet in ${result.file_path}, lines ${result.start_line}–${result.end_line}, was ranked as conceptually related to “${queryLabel}”. The search did not find the question’s key terms verbatim here, so use the code below to check whether it implements the behavior you mean.`;
   const relatedFiles = Array.from((result.content || '').matchAll(/(?:from\s+|import\s+)["']?([\w./-]+)["']?/g))
     .map((match) => match[1])
     .filter((path) => path.includes('/') || path.endsWith('.py'))
@@ -191,6 +205,11 @@ export const CodeCard: React.FC<CodeCardProps> = ({ result, rank, onOpenHistory 
             <p className="text-gray-200 text-sm font-medium leading-relaxed">
               {relevanceText}
             </p>
+            {matchedTerms.length > 0 && (
+              <div className="flex flex-wrap gap-1.5 pt-1" aria-label="Query terms found in this result">
+                {matchedTerms.map((term) => <span className="explanation-evidence-term" key={term}>{term}</span>)}
+              </div>
+            )}
           </div>
 
           {/* Step-by-Step Breakdown */}
