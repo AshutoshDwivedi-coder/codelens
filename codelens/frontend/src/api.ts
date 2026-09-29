@@ -1,5 +1,10 @@
 // API client for CodeLens backend
 
+// Leave this empty for local Vite development, where the dev-server proxy
+// forwards /api requests to FastAPI. Set it to the Render service URL in Vercel.
+const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? '').replace(/\/$/, '');
+const apiUrl = (path: string) => `${API_BASE_URL}${path}`;
+
 export interface ScoreBreakdown {
   bm25_rank?: number;
   dense_score?: number;
@@ -92,7 +97,7 @@ export async function searchCode(params: {
   // Note: alpha and repo_filter are not supported by the backend SearchRequest;
   // they are kept in the params for UI display purposes only.
 
-  const res = await fetch('/api/search', {
+  const res = await fetch(apiUrl('/api/search'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
@@ -164,7 +169,7 @@ export async function getVersions(
   const url = repo_name
     ? `/api/versions?repo_name=${encodeURIComponent(repo_name)}`
     : '/api/versions';
-  const res = await fetch(url);
+  const res = await fetch(apiUrl(url));
   if (!res.ok) {
     throw new Error('Failed to fetch commit versions');
   }
@@ -193,7 +198,7 @@ export async function getSnippetHistory(
   // Backend uses a path wildcard route ({file_path:path}), so slashes must
   // NOT be percent-encoded — only the query string should be encoded.
   const res = await fetch(
-    `/api/versions/history/${filePath}${query}`
+    apiUrl(`/api/versions/history/${filePath}${query}`)
   );
   if (!res.ok) {
     throw new Error('Failed to fetch snippet evolution history');
@@ -202,7 +207,7 @@ export async function getSnippetHistory(
 }
 
 export async function getHealth(): Promise<HealthResponse> {
-  const res = await fetch('/api/health');
+  const res = await fetch(apiUrl('/api/health'));
   if (!res.ok) throw new Error('Backend health check failed');
   return res.json();
 }
@@ -211,7 +216,7 @@ export async function startIndexing(
   repoPath?: string
 ): Promise<{ status: string; job_id: string }> {
   const targetPath = repoPath || '.';
-  const res = await fetch('/api/index', {
+  const res = await fetch(apiUrl('/api/index'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ repo_path: targetPath }),
@@ -233,7 +238,7 @@ export interface RepoInfo {
 }
 
 export async function getRepos(): Promise<{ repos: RepoInfo[] }> {
-  const res = await fetch('/api/repos');
+  const res = await fetch(apiUrl('/api/repos'));
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: 'Failed to fetch repositories' }));
     throw new Error(err.detail || 'Failed to fetch repositories');
@@ -258,11 +263,10 @@ export async function analyzeReadme(
   repoPath?: string
 ): Promise<ReadmeAnalysis> {
   const query = repoPath && repoPath !== 'all' ? `?repo_path=${encodeURIComponent(repoPath)}` : '';
-  const res = await fetch(`/api/readme/analyze${query}`);
+  const res = await fetch(apiUrl(`/api/readme/analyze${query}`));
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: 'Failed to analyze repository README' }));
     throw new Error(err.detail || 'Failed to analyze repository README');
   }
   return res.json();
 }
-
