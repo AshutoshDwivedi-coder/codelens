@@ -3,20 +3,12 @@ import { Database, ChevronDown, Check, FolderGit2, Plus, X, RefreshCw, AlertCirc
 import { getRepos, RepoInfo } from '../api';
 
 interface RepoSelectorProps {
-  selectedRepos?: string[]; // empty array or ['all'] means all repos
+  selectedRepos?: string[]; // an empty array means all indexed repos
   onChangeSelectedRepos: (repos: string[], repoPaths?: Record<string, string>) => void;
   /** Called when a new repo was just indexed so the parent can refresh */
   onRepoListRefresh?: () => void;
+  onAddRepository?: (repoPath: string) => void;
 }
-
-const ALL_REPO: RepoInfo = {
-  id: 'all',
-  name: 'All Repositories',
-  description: 'Search across all indexed codebases',
-  path: '',
-  source: 'indexed',
-  chunk_count: 0,
-};
 
 const SOURCE_BADGE: Record<string, { label: string; cls: string }> = {
   indexed: { label: 'Indexed', cls: 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20' },
@@ -26,13 +18,14 @@ const SOURCE_BADGE: Record<string, { label: string; cls: string }> = {
 };
 
 export const RepoSelector: React.FC<RepoSelectorProps> = ({
-  selectedRepos = ['all'],
+  selectedRepos = [],
   onChangeSelectedRepos,
   onRepoListRefresh,
+  onAddRepository,
 }) => {
   const [isOpen, setIsOpen] = useState(false);
   const [customInput, setCustomInput] = useState('');
-  const [repos, setRepos] = useState<RepoInfo[]>([ALL_REPO]);
+  const [repos, setRepos] = useState<RepoInfo[]>([]);
   const [isLoadingRepos, setIsLoadingRepos] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   /** Maps repo id → absolute path for custom/cloned entries */
@@ -45,7 +38,7 @@ export const RepoSelector: React.FC<RepoSelectorProps> = ({
     try {
       const data = await getRepos();
       const fetched = data.repos || [];
-      setRepos([ALL_REPO, ...fetched]);
+      setRepos(fetched);
       // Build path map from fetched repos
       const pathMap: Record<string, string> = {};
       fetched.forEach((r) => { if (r.path) pathMap[r.id] = r.path; });
@@ -74,26 +67,24 @@ export const RepoSelector: React.FC<RepoSelectorProps> = ({
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  const currentList = Array.isArray(selectedRepos) ? selectedRepos : ['all'];
-  const isAllSelected = currentList.length === 0 || currentList.includes('all');
+  const currentList = Array.isArray(selectedRepos) ? selectedRepos : [];
+  const isAllSelected = currentList.length === 0;
 
   const notifyChange = (next: string[], extraPaths?: Record<string, string>) => {
     const allPaths = { ...repoPaths, ...(extraPaths || {}) };
     onChangeSelectedRepos(next, allPaths);
   };
 
-  const handleSelectAll = () => notifyChange(['all']);
+  const handleSelectAll = () => notifyChange([]);
 
   const handleToggleRepo = (repoId: string) => {
-    if (repoId === 'all') { notifyChange(['all']); return; }
     let next: string[];
     if (isAllSelected) {
       next = [repoId];
     } else if (currentList.includes(repoId)) {
       next = currentList.filter((r) => r !== repoId);
-      if (next.length === 0) next = ['all'];
     } else {
-      next = [...currentList.filter((r) => r !== 'all'), repoId];
+      next = [...currentList, repoId];
     }
     notifyChange(next);
   };
@@ -123,6 +114,7 @@ export const RepoSelector: React.FC<RepoSelectorProps> = ({
       setRepoPaths((prev) => ({ ...prev, ...extraPaths }));
       // Switch selection to this new repo immediately
       notifyChange([newId], extraPaths);
+      onAddRepository?.(isPath ? trimmed : trimmed);
     } else {
       handleToggleRepo(newId);
     }
@@ -130,7 +122,7 @@ export const RepoSelector: React.FC<RepoSelectorProps> = ({
   };
 
   const getDisplayText = () => {
-    if (isAllSelected) return 'All Repositories';
+    if (isAllSelected) return 'All Indexed Repositories';
     if (currentList.length === 1) {
       const match = repos.find((r) => r.id === currentList[0]);
       return match ? match.name : currentList[0];
@@ -189,15 +181,15 @@ export const RepoSelector: React.FC<RepoSelectorProps> = ({
 
           {/* Repo list */}
           <div className="space-y-1 max-h-56 overflow-y-auto pr-0.5">
-            {repos.length <= 1 && !isLoadingRepos && (
+            {repos.length === 0 && !isLoadingRepos && (
               <div className="text-center text-gray-500 text-[11px] py-4">
                 <Cpu className="w-4 h-4 mx-auto mb-1 text-gray-600" />
                 No indexed repos found.<br />Index a repository first.
               </div>
             )}
             {repos.map((repo) => {
-              const checked = repo.id === 'all' ? isAllSelected : !isAllSelected && currentList.includes(repo.id);
-              const isCustom = !['all', 'indexed', 'demo', 'cloned'].includes(repo.id) &&
+              const checked = isAllSelected || currentList.includes(repo.id);
+              const isCustom = !['indexed', 'demo', 'cloned'].includes(repo.id) &&
                 !['indexed', 'demo', 'cloned'].includes(repo.source);
               const badgeKey = isCustom ? 'custom' : repo.source;
               const badge = SOURCE_BADGE[badgeKey] || SOURCE_BADGE.indexed;
@@ -216,20 +208,16 @@ export const RepoSelector: React.FC<RepoSelectorProps> = ({
                   <div className="space-y-0.5 truncate pr-2 flex-1">
                     <div className="flex items-center gap-1.5">
                       <span className="font-semibold block text-xs truncate">{repo.name}</span>
-                      {repo.id !== 'all' && (
-                        <span className={`shrink-0 text-[9px] font-medium px-1 py-0.5 rounded border ${badge.cls}`}>
-                          {badge.label}
-                        </span>
-                      )}
+                      <span className={`shrink-0 text-[9px] font-medium px-1 py-0.5 rounded border ${badge.cls}`}>
+                        {badge.label}
+                      </span>
                     </div>
                     <span className="text-[10px] text-gray-400 block truncate">{repo.description}</span>
                     {repo.chunk_count > 0 && (
                       <span className="text-[9px] text-gray-500">{repo.chunk_count} chunks</span>
                     )}
                   </div>
-                  <div className={`w-4 h-4 rounded flex items-center justify-center border shrink-0 ${
-                    checked ? 'bg-emerald-500 border-emerald-500 text-black' : 'border-[#484f58] bg-[#0d1117]'
-                  }`}>
+                  <div className={`repo-checkbox w-4 h-4 rounded flex items-center justify-center border shrink-0 ${checked ? 'is-checked' : ''}`}>
                     {checked && <Check className="w-3 h-3 stroke-[3]" />}
                   </div>
                 </button>
@@ -271,7 +259,7 @@ export const RepoSelector: React.FC<RepoSelectorProps> = ({
                 onClick={handleSelectAll}
                 className="text-[11px] text-blue-400 hover:text-blue-300 hover:underline"
               >
-                Reset to All Repositories
+                Clear selection
               </button>
             </div>
           )}

@@ -10,10 +10,10 @@ from __future__ import annotations
 import logging
 from typing import Optional, List, Dict, Any
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
-from app.readme_analyzer import analyze_readme
+from app.readme_analyzer import analyze_readme, resolve_repo_dir, find_readme_file
 
 logger = logging.getLogger("codelens.api.readme")
 
@@ -54,3 +54,22 @@ async def post_readme_analyze(body: ReadmeAnalyzeRequest):
     POST route for repository README analysis.
     """
     return analyze_readme(body.repo_path)
+
+
+@router.get("/readme/content")
+async def get_readme_content(
+    repo_path: Optional[str] = Query(None, description="Repository path or alias"),
+):
+    """Return the selected repository's README text for the in-app reader."""
+    resolved_dir, remote_content, repo_name = resolve_repo_dir(repo_path)
+    if remote_content:
+        return {"repo_name": repo_name or resolved_dir.name, "filename": "README.md", "content": remote_content}
+
+    readme_file = find_readme_file(resolved_dir)
+    if readme_file is None:
+        raise HTTPException(status_code=404, detail=f"No README found for {repo_name or resolved_dir.name}")
+    try:
+        content = readme_file.read_text(encoding="utf-8", errors="replace")
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail=f"Could not read {readme_file.name}") from exc
+    return {"repo_name": repo_name or resolved_dir.name, "filename": readme_file.name, "content": content}

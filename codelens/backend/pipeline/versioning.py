@@ -96,9 +96,14 @@ class VersionManager:
         n_cached: int,
         commit_message: str = "",
         tag: str = "",
+        repo_path: str = "",
+        repo_name: str = "",
+        original_commit: str = "",
     ) -> dict:
+        resolved_name = repo_name or (Path(repo_path).name if repo_path else "")
         manifest = {
             "commit_sha": commit_sha,
+            "original_commit": original_commit or commit_sha,
             "tag": tag,
             "commit_message": commit_message,
             "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -107,6 +112,8 @@ class VersionManager:
             "build_time_seconds": round(build_time_seconds, 2),
             "n_embedded": n_embedded,
             "n_cached": n_cached,
+            "repo_path": repo_path,
+            "repo_name": resolved_name,
         }
         snap_dir = self.snapshot_dir(commit_sha)
         snap_dir.mkdir(parents=True, exist_ok=True)
@@ -145,6 +152,26 @@ class VersionManager:
             logger.warning("Could not get HEAD: %s", stderr)
             return "unknown"
         return stdout.strip()
+
+    def get_git_toplevel(self, repo_dir: str) -> Optional[str]:
+        """Return the git work-tree root for *repo_dir*, or None if not a git checkout."""
+        stdout, _, rc = _run_git(["rev-parse", "--show-toplevel"], cwd=repo_dir)
+        if rc != 0:
+            return None
+        return stdout.strip() or None
+
+    def make_snapshot_id(self, repo_dir: str, commit_sha: str) -> str:
+        """
+        Build a unique snapshot directory id namespaced by repo folder name.
+
+        Nested folders inside a monorepo share the parent's HEAD SHA; without
+        namespacing they overwrite each other under indexes/<sha>/.
+        """
+        import re
+        name = Path(repo_dir).name or "repo"
+        safe_name = re.sub(r"[^\w.-]+", "_", name)[:48] or "repo"
+        safe_sha = re.sub(r"[^\w.-]+", "_", commit_sha)[:40] or "local"
+        return f"{safe_name}__{safe_sha}"
 
     def get_commit_message(self, repo_dir: str, sha: str) -> str:
         stdout, _, _ = _run_git(["log", "-1", "--pretty=%s", sha], cwd=repo_dir)

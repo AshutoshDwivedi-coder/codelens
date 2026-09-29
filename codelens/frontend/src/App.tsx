@@ -6,53 +6,73 @@ import { EvolutionModal } from './components/EvolutionModal';
 import { IndexingModal } from './components/IndexingModal';
 import { HelpModal } from './components/HelpModal';
 import { ReadmeInsightCard } from './components/ReadmeInsightCard';
+import { CodebaseSummary } from './components/CodebaseSummary';
+import { RecommendedQuestionsPanel } from './components/RecommendedQuestionsPanel';
+import { ReadmeViewerModal } from './components/ReadmeViewerModal';
 import {
   getHealth,
+  getRepos,
   getVersions,
   searchCode,
   analyzeReadme,
   HealthResponse,
   SearchResult,
   ReadmeAnalysis,
+  RepositoryReadme,
+  getRepositoryReadme,
+  RepoInfo,
 } from './api';
 import {
-  Search,
-  Zap,
   Clock,
   Database,
-  Code,
-  Sparkles,
   BookOpen,
-  HelpCircle,
   Lightbulb,
-  ShieldCheck,
-  CheckCircle2,
+  SearchX,
 } from 'lucide-react';
+
+/** Fallback queries aligned with CodeLens itself when README has none. */
+const SAMPLE_QUERIES = [
+  'Where is health check status endpoint defined?',
+  'Where is query search result caching stored?',
+  'How does BM25 keyword matching compute scores?',
+  'Where are dense vector embeddings generated?',
+  'How does Tree-Sitter AST chunking parse code?',
+];
 
 export function App() {
   const [query, setQuery] = useState('');
   const [useHybrid, setUseHybrid] = useState(true);
   const [alpha, setAlpha] = useState(0.5);
   const [topK, setTopK] = useState(10);
-  const [selectedRepos, setSelectedRepos] = useState<string[]>(['all']);
+  const [selectedRepos, setSelectedRepos] = useState<string[]>([]);
   // Maps repo id → actual filesystem/URL path for README analysis
   const [repoPaths, setRepoPaths] = useState<Record<string, string>>({});
   const [selectedCommit, setSelectedCommit] = useState('HEAD');
 
   const [results, setResults] = useState<SearchResult[]>([]);
+  const [activeResultIndex, setActiveResultIndex] = useState(0);
   const [timingMs, setTimingMs] = useState<number | null>(null);
   const [totalCandidates, setTotalCandidates] = useState<number>(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [hasSearched, setHasSearched] = useState(false);
 
   const [health, setHealth] = useState<HealthResponse | null>(null);
   const [commits, setCommits] = useState<string[]>([]);
+  const [availableRepos, setAvailableRepos] = useState<RepoInfo[]>([]);
 
   const [readmeAnalysis, setReadmeAnalysis] = useState<ReadmeAnalysis | null>(null);
+  const [selectedRepoDescriptions, setSelectedRepoDescriptions] = useState<{ id: string; name: string; description: string }[]>([]);
+  const [repositoryReadme, setRepositoryReadme] = useState<RepositoryReadme | null>(null);
+  const [isRepositoryReadmeLoading, setIsRepositoryReadmeLoading] = useState(false);
+  const [repositoryReadmeError, setRepositoryReadmeError] = useState<string | null>(null);
   const [isReadmeLoading, setIsReadmeLoading] = useState(false);
 
   const [historyResult, setHistoryResult] = useState<SearchResult | null>(null);
   const [isIndexModalOpen, setIsIndexModalOpen] = useState(false);
+  const [indexTargetPath, setIndexTargetPath] = useState('');
+  const [autoStartIndexing, setAutoStartIndexing] = useState(false);
+  const [searchAfterIndex, setSearchAfterIndex] = useState<string | null>(null);
   const [isHelpModalOpen, setIsHelpModalOpen] = useState(false);
 
   const searchInputRef = useRef<HTMLInputElement>(null);
@@ -64,13 +84,16 @@ export function App() {
     getVersions()
       .then((data) => setCommits(data.commits.map((c) => c.commit_id)))
       .catch((err) => console.warn('Versions warning:', err));
+    getRepos()
+      .then((data) => setAvailableRepos(data.repos || []))
+      .catch((err) => console.warn('Repositories warning:', err));
   };
 
   const fetchReadmeAnalysis = (repoList: string[], paths?: Record<string, string>) => {
     setIsReadmeLoading(true);
     const activePaths = paths || repoPaths;
     let targetRepo: string | undefined;
-    if (repoList.length > 0 && !repoList.includes('all')) {
+    if (repoList.length > 0) {
       const repoId = repoList[0];
       // Prefer the actual path if we have it, otherwise use the id
       targetRepo = activePaths[repoId] || repoId;
@@ -85,6 +108,21 @@ export function App() {
       .finally(() => setIsReadmeLoading(false));
   };
 
+  const openRepositoryReadme = async () => {
+    const repoId = selectedRepos[0];
+    const repoPath = repoId ? repoPaths[repoId] || repoId : undefined;
+    setRepositoryReadme(null);
+    setRepositoryReadmeError(null);
+    setIsRepositoryReadmeLoading(true);
+    try {
+      setRepositoryReadme(await getRepositoryReadme(repoPath));
+    } catch (err: any) {
+      setRepositoryReadmeError(err.message || 'Could not open repository README');
+    } finally {
+      setIsRepositoryReadmeLoading(false);
+    }
+  };
+
   useEffect(() => {
     fetchHealthAndVersions();
   }, []);
@@ -94,7 +132,37 @@ export function App() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedRepos]);
 
-  // Keyboard shortcut listener for '/' to focus search bar
+  useEffect(() => {
+    let cancelled = false;
+    if (selectedRepos.length < 2) {
+      setSelectedRepoDescriptions([]);
+      return () => { cancelled = true; };
+    }
+
+    const selected = selectedRepos.map((id) => {
+      const repo = availableRepos.find((item) => item.id === id);
+      return {
+        id,
+        name: repo?.name || id.split(/[\\/]/).filter(Boolean).pop() || id,
+        path: repoPaths[id] || repo?.path || id,
+        fallback: repo?.description || 'Selected repository',
+      };
+    });
+    void Promise.all(selected.map(async (repo) => {
+      try {
+        const analysis = await analyzeReadme(repo.path);
+        return { id: repo.id, name: repo.name, description: analysis.summary || repo.fallback };
+      } catch {
+        return { id: repo.id, name: repo.name, description: repo.fallback };
+      }
+    })).then((descriptions) => {
+      if (!cancelled) setSelectedRepoDescriptions(descriptions);
+    });
+
+    return () => { cancelled = true; };
+  }, [selectedRepos, availableRepos, repoPaths]);
+
+  // Keyboard shortcut listener for '/' to focus search bar (hint badge removed from UI)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (
@@ -110,17 +178,19 @@ export function App() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, []);
 
-  const handleSearch = async (overrideQuery?: string) => {
+  const handleSearch = async (overrideQuery?: string, repoFilterOverride?: string) => {
     const q = overrideQuery !== undefined ? overrideQuery : query;
     if (!q.trim()) return;
 
     setLoading(true);
     setError(null);
+    setHasSearched(true);
 
-    const repoFilterString =
-      selectedRepos.length === 0 || selectedRepos.includes('all')
+    const repoFilterString = repoFilterOverride ?? (
+      selectedRepos.length === 0
         ? undefined
-        : selectedRepos.join(',');
+        : selectedRepos.join(',')
+    );
 
     try {
       const res = await searchCode({
@@ -132,44 +202,63 @@ export function App() {
         alpha,
       });
       setResults(res.results || []);
+      setActiveResultIndex(0);
       setTimingMs(res.timing_ms);
       setTotalCandidates(res.total_candidates);
+      if (res.error) {
+        setError(
+          res.error.includes('not indexed')
+            ? `“${repoFilterString || 'Selected repository'}” is not indexed yet. Open Index Repository, index it, then click a recommended question again.`
+            : res.error
+        );
+        if (res.error.includes('not indexed')) {
+          setSearchAfterIndex(q);
+          const selectedId = selectedRepos[0];
+          const path = repoPaths[selectedId] || selectedId;
+          setIndexTargetPath(path);
+          setAutoStartIndexing(true);
+          setIsIndexModalOpen(true);
+        }
+      }
     } catch (err: any) {
-      setError(err.message || 'Search execution failed');
+      const message = err.message || 'Search execution failed';
+      // Guide users when nothing is indexed yet
+      if (
+        typeof message === 'string' &&
+        (message.includes('not initialised') || message.includes('Index a repository'))
+      ) {
+        setError('No codebase is indexed yet. Open Index Repository, index the selected repo, then try the recommended questions again.');
+      } else {
+        setError(message);
+      }
       setResults([]);
     } finally {
       setLoading(false);
     }
   };
 
-  const sampleQueries = [
-    { label: 'Health & Server Status', query: 'Where is health check status endpoint defined?' },
-    { label: 'Search Query Caching', query: 'Where is query search result caching stored?' },
-    { label: 'BM25 Keyword Engine', query: 'How does BM25 keyword matching compute scores?' },
-    { label: 'Vector AI Embeddings', query: 'Calculate sentence transformer embedding vectors' },
-    { label: 'Commit History Lineage', query: 'AST structural similarity and git history lineage' },
-  ];
-
   const suggestedQuestions = readmeAnalysis?.suggested_questions || [];
-  const quickQueries = suggestedQuestions.length > 0
-    ? suggestedQuestions.slice(0, 5).map((q) => {
-        let label = q;
-        if (label.length > 36) {
-          label = label.replace(/^Where is (the )?/i, '').replace(/^How does (the )?/i, '').replace(/\?$/, '');
-          label = label.charAt(0).toUpperCase() + label.slice(1);
-          if (label.length > 32) label = label.slice(0, 30) + '…';
-        }
-        return { label, query: q };
-      })
-    : sampleQueries;
+  const recommendedQuestions =
+    suggestedQuestions.length > 0 ? suggestedQuestions.slice(0, 8) : SAMPLE_QUERIES;
 
   const currentRepoDisplayName =
-    selectedRepos.includes('all') || selectedRepos.length === 0
-      ? 'CodeLens'
+    selectedRepos.length === 0
+      ? readmeAnalysis?.repo_name || 'CodeLens'
       : selectedRepos[0];
 
+  const sidebarRepositories = selectedRepos.length === 0
+    ? availableRepos.filter((repo) => repo.source === 'indexed')
+    : selectedRepos.map((id) => availableRepos.find((repo) => repo.id === id) || ({
+        id,
+        name: id.split(/[\\/]/).filter(Boolean).pop() || id,
+        description: 'Selected repository',
+        path: repoPaths[id] || id,
+        source: 'indexed' as const,
+        chunk_count: 0,
+      }));
+
   return (
-    <div className="min-h-screen bg-[#0d1117] text-[#c9d1d9] flex flex-col font-sans selection:bg-blue-600/30 selection:text-blue-200">
+    <div className="app-shell min-h-screen bg-[#0d1117] text-[#c9d1d9] flex flex-col font-sans selection:bg-amber-600/20 selection:text-amber-100">
       {/* Header Navigation */}
       <Header
         health={health}
@@ -180,8 +269,35 @@ export function App() {
         onOpenHelpModal={() => setIsHelpModalOpen(true)}
       />
 
+      {/* Codebase summary above the search bar */}
+      <div className="app-body">
+      <aside className="project-sidebar">
+        <nav className="side-nav" aria-label="Main navigation">
+          <button className="side-nav-item active" onClick={() => searchInputRef.current?.focus()}><SearchX size={15}/>Search</button>
+          <button className="side-nav-item" onClick={() => setIsHelpModalOpen(true)}><BookOpen size={15}/>Guide &amp; Glossary</button>
+        </nav>
+        <div className="sidebar-project-label">PROJECT</div>
+        <CodebaseSummary
+        title={selectedRepos.length > 1 ? `${selectedRepos.length} repositories selected` : readmeAnalysis?.title || `${currentRepoDisplayName} Overview`}
+        summary={
+          readmeAnalysis?.summary ||
+          'Select a repository to see a short summary of what it does and how it is structured.'
+        }
+        repoName={currentRepoDisplayName}
+        hasReadme={!!readmeAnalysis?.has_readme}
+        filename={readmeAnalysis?.filename}
+        keyModules={readmeAnalysis?.key_modules}
+        isLoading={isReadmeLoading}
+        onOpenReadme={() => void openRepositoryReadme()}
+        selectedRepoNames={sidebarRepositories.map((repo) => repo.name)}
+        selectedRepoDescriptions={selectedRepoDescriptions}
+        repoScopeLabel={selectedRepos.length === 0 ? 'ALL INDEXED REPOSITORIES' : 'SELECTED REPOSITORIES'}
+        />
+      </aside>
+      <div className="workspace-column">
+
       {/* Main Search Controls */}
-      <SearchBar
+        <SearchBar
         query={query}
         setQuery={setQuery}
         onSearch={() => handleSearch()}
@@ -200,69 +316,61 @@ export function App() {
           }
         }}
         inputRef={searchInputRef}
+        onAddRepository={(path) => {
+          setIndexTargetPath(path);
+          setAutoStartIndexing(true);
+          setSearchAfterIndex(null);
+          setIsIndexModalOpen(true);
+        }}
       />
 
+      {/* Recommended questions panel directly under the search bar */}
+      <div className="bg-[#161b22] border-b border-[#30363d] px-6 pb-5">
+        <div className="max-w-7xl mx-auto">
+          <RecommendedQuestionsPanel
+            questions={recommendedQuestions}
+            repoName={currentRepoDisplayName}
+            hasReadme={!!readmeAnalysis?.has_readme}
+            isLoading={isReadmeLoading}
+            onSelectQuestion={(q) => {
+              setQuery(q);
+              handleSearch(q);
+            }}
+          />
+        </div>
+      </div>
+
       {/* Main Workspace Area */}
-      <main className="flex-1 max-w-7xl w-full mx-auto p-6 space-y-6">
-        {/* Repository README Analysis & Suggested Questions */}
+      <main className="flex-1 max-w-7xl w-full mx-auto p-6 space-y-6 workspace-main">
+        {/* Optional architecture details */}
         <ReadmeInsightCard
           analysis={readmeAnalysis}
           isLoading={isReadmeLoading}
-          onSelectQuestion={(q) => {
-            setQuery(q);
-            handleSearch(q);
-          }}
           onRefresh={() => fetchReadmeAnalysis(selectedRepos)}
           selectedRepoName={currentRepoDisplayName}
         />
 
-        {/* Sample Queries Bar */}
-        <div className="flex flex-wrap items-center gap-2 text-xs">
-          <span className="text-gray-400 font-semibold flex items-center gap-1.5 shrink-0">
-            <Sparkles className="w-3.5 h-3.5 text-blue-400" />
-            {readmeAnalysis?.has_readme ? `Suggested for ${currentRepoDisplayName}:` : 'Quick Search Ideas:'}
-          </span>
-          {quickQueries.map((item) => (
-            <button
-              key={item.label}
-              onClick={() => {
-                setQuery(item.query);
-                handleSearch(item.query);
-              }}
-              className="bg-[#161b22] hover:bg-[#21262d] hover:border-blue-500/40 text-gray-300 border border-[#30363d] px-3 py-1.5 rounded-lg transition-all font-sans text-xs flex items-center space-x-1.5 group"
-            >
-              <span>{item.label}</span>
-            </button>
-          ))}
-        </div>
-
         {/* Search Telemetry Bar */}
         {timingMs !== null && !loading && (
-          <div className="bg-[#161b22] border border-[#30363d] px-5 py-3 rounded-xl flex flex-wrap items-center justify-between text-xs text-gray-300 gap-3 shadow-sm">
-            <div className="flex items-center space-x-5 font-mono">
-              <div className="flex items-center space-x-1.5 text-blue-400" title="Response time in milliseconds">
-                <Clock className="w-4 h-4" />
-                <span>Search Speed: <strong>{timingMs.toFixed(1)} ms</strong></span>
-              </div>
-              <div className="flex items-center space-x-1.5 text-purple-400" title="Total code blocks evaluated">
-                <Database className="w-4 h-4" />
-                <span>Scanned Code Blocks: <strong>{totalCandidates}</strong></span>
-              </div>
-              <div className="flex items-center space-x-1.5 text-emerald-400">
-                <Zap className="w-4 h-4" />
-                <span>Algorithm: <strong>{useHybrid ? 'Smart Hybrid (Keyword + AI)' : 'Conceptual AI'}</strong></span>
-              </div>
-            </div>
-            <span className="text-gray-400 font-medium">
-              Found <strong>{results.length}</strong> top matching code snippets
-            </span>
+          <div className="metadata-strip">
+            <span><Clock size={13}/><strong>{(timingMs / 1000).toFixed(2)}s</strong></span>
+            <span><Database size={13}/><strong>{totalCandidates}</strong> blocks scanned</span>
+            <span>{useHybrid ? 'Hybrid retrieval' : 'Conceptual retrieval'}</span>
+            <span><strong>{results.length}</strong> results</span>
           </div>
         )}
 
         {/* Error Banner */}
         {error && (
-          <div className="p-4 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 text-sm">
-            {error}
+          <div className="p-4 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 text-sm flex flex-wrap items-center justify-between gap-3">
+            <span>{error}</span>
+            <button
+              type="button"
+              onClick={() => setIsIndexModalOpen(true)}
+              className="px-3 py-1.5 rounded-lg bg-red-500/20 hover:bg-red-500/30 border border-red-500/30 text-red-200 text-xs font-semibold"
+            >
+              Open Index Repository
+            </button>
           </div>
         )}
 
@@ -280,20 +388,47 @@ export function App() {
 
         {/* Search Results List */}
         {!loading && results.length > 0 && (
-          <div className="space-y-5">
-            {results.map((r, idx) => (
-              <CodeCard
-                key={r.chunk_id || idx}
-                result={r}
-                rank={idx + 1}
-                onOpenHistory={(res) => setHistoryResult(res)}
-              />
-            ))}
+          <div className="result-workspace">
+            <div className="result-list" aria-label="Search results">
+              {results.map((r, idx) => (
+                <button key={r.chunk_id || idx} type="button" className={`result-row ${activeResultIndex === idx ? 'selected' : ''}`} onClick={() => setActiveResultIndex(idx)}>
+                  <span className="result-rank">{idx + 1}</span>
+                  <span className="result-row-content"><strong>{r.file_path}</strong><small>Lines {r.start_line}–{r.end_line}</small><span>{r.docstring || r.symbol_name || r.content.split('\n').find((line) => line.trim() && !line.trim().startsWith('#')) || 'Code match in this file.'}</span></span>
+                  <span className={`result-score ${r.score >= .8 ? 'strong' : ''}`}>{Math.min(Math.round(r.score * 100), 99)}%</span>
+                </button>
+              ))}
+            </div>
+            {results[activeResultIndex] && <CodeCard key={results[activeResultIndex].chunk_id} result={results[activeResultIndex]} rank={activeResultIndex + 1} onOpenHistory={(res) => setHistoryResult(res)} />}
           </div>
         )}
 
-        {/* Initial Empty State / Non-Technical Onboarding */}
-        {!loading && results.length === 0 && !error && (
+        {/* No matches after an explicit search */}
+        {!loading && hasSearched && results.length === 0 && !error && (
+          <div className="py-12 px-8 border border-dashed border-[#30363d] rounded-2xl bg-[#161b22]/40 text-center space-y-4 max-w-3xl mx-auto">
+            <div className="w-12 h-12 rounded-2xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center mx-auto text-amber-400">
+              <SearchX className="w-6 h-6" />
+            </div>
+            <div className="space-y-2">
+              <h3 className="font-bold text-lg text-white">No matching code snippets</h3>
+              <p className="text-sm text-gray-400 leading-relaxed">
+                Nothing in the current index matched this question
+                {selectedRepos.length === 0 ? '' : ` for “${currentRepoDisplayName}”`}.
+                Index the selected repository first, or try another recommended question.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setIsIndexModalOpen(true)}
+              className="inline-flex items-center space-x-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-semibold text-xs px-5 py-2.5 rounded-xl shadow-lg shadow-blue-600/20 transition-all"
+            >
+              <Database className="w-4 h-4" />
+              <span>Index Repository</span>
+            </button>
+          </div>
+        )}
+
+        {/* Initial Empty State / Onboarding */}
+        {!loading && !hasSearched && results.length === 0 && !error && (
           <div className="py-14 px-8 border border-dashed border-[#30363d] rounded-2xl bg-[#161b22]/40 text-center space-y-6 max-w-4xl mx-auto">
             <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-blue-600/20 to-indigo-600/20 border border-blue-500/30 flex items-center justify-center mx-auto text-blue-400 shadow-lg shadow-blue-500/10">
               <Lightbulb className="w-7 h-7 text-amber-400" />
@@ -304,55 +439,31 @@ export function App() {
                 Search Source Code in Plain English
               </h3>
               <p className="text-sm text-gray-300 leading-relaxed">
-                CodeLens uses AI-powered semantic search to connect natural business questions directly to the underlying source code.
+                Pick a recommended question below the search bar, or type your own. Make sure the selected codebase is indexed so snippets can be found.
               </p>
             </div>
 
-            {/* Feature Cards Grid */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-left pt-2">
-              <div className="bg-[#0d1117] border border-[#30363d] rounded-xl p-4 space-y-2">
-                <div className="w-8 h-8 rounded-lg bg-blue-500/10 text-blue-400 flex items-center justify-center font-bold text-xs">
-                  💡
-                </div>
-                <h4 className="font-bold text-gray-200 text-sm">Plain English Views</h4>
-                <p className="text-xs text-gray-400 leading-relaxed">
-                  Every result comes with an automatic plain-English breakdown of what the code does step-by-step.
-                </p>
-              </div>
-
-              <div className="bg-[#0d1117] border border-[#30363d] rounded-xl p-4 space-y-2">
-                <div className="w-8 h-8 rounded-lg bg-purple-500/10 text-purple-400 flex items-center justify-center font-bold text-xs">
-                  🌿
-                </div>
-                <h4 className="font-bold text-gray-200 text-sm">Version History</h4>
-                <p className="text-xs text-gray-400 leading-relaxed">
-                  Track how functions and features changed across git commits over time with AST lineage tracking.
-                </p>
-              </div>
-
-              <div className="bg-[#0d1117] border border-[#30363d] rounded-xl p-4 space-y-2">
-                <div className="w-8 h-8 rounded-lg bg-emerald-500/10 text-emerald-400 flex items-center justify-center font-bold text-xs">
-                  ⚡
-                </div>
-                <h4 className="font-bold text-gray-200 text-sm">Sub-10ms Fast CPU</h4>
-                <p className="text-xs text-gray-400 leading-relaxed">
-                  Lightning fast hybrid search powered by BM25 exact keywords and CPU dense embeddings.
-                </p>
-              </div>
-            </div>
-
-            <div className="pt-2">
+            <div className="pt-2 flex flex-wrap items-center justify-center gap-3">
               <button
-                onClick={() => setIsHelpModalOpen(true)}
+                onClick={() => setIsIndexModalOpen(true)}
                 className="inline-flex items-center space-x-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-semibold text-xs px-5 py-2.5 rounded-xl shadow-lg shadow-blue-600/20 transition-all"
               >
+                <Database className="w-4 h-4" />
+                <span>Index a Repository</span>
+              </button>
+              <button
+                onClick={() => setIsHelpModalOpen(true)}
+                className="inline-flex items-center space-x-2 bg-[#21262d] hover:bg-[#30363d] text-gray-200 font-semibold text-xs px-5 py-2.5 rounded-xl border border-[#30363d] transition-all"
+              >
                 <BookOpen className="w-4 h-4" />
-                <span>Open Plain English Guide & Glossary</span>
+                <span>Open Guide</span>
               </button>
             </div>
           </div>
         )}
       </main>
+      </div>
+      </div>
 
       {/* Evolutionary Code History Modal */}
       <EvolutionModal
@@ -363,7 +474,12 @@ export function App() {
       {/* Index Management Modal */}
       <IndexingModal
         isOpen={isIndexModalOpen}
-        onClose={() => setIsIndexModalOpen(false)}
+        initialRepoPath={indexTargetPath}
+        autoStart={autoStartIndexing}
+        onClose={() => {
+          setIsIndexModalOpen(false);
+          setAutoStartIndexing(false);
+        }}
         onIndexingComplete={(repoPath?: string) => {
           fetchHealthAndVersions();
           // After indexing a new repo, select it automatically and refresh questions
@@ -373,9 +489,15 @@ export function App() {
             setRepoPaths(newPaths);
             setSelectedRepos([repoId]);
             fetchReadmeAnalysis([repoId], newPaths);
+            if (searchAfterIndex) {
+              setSearchAfterIndex(null);
+              void handleSearch(searchAfterIndex, repoId);
+            }
           } else {
             fetchReadmeAnalysis(selectedRepos);
           }
+          setIndexTargetPath('');
+          setAutoStartIndexing(false);
         }}
       />
 
@@ -383,6 +505,16 @@ export function App() {
       <HelpModal
         isOpen={isHelpModalOpen}
         onClose={() => setIsHelpModalOpen(false)}
+      />
+
+      <ReadmeViewerModal
+        readme={repositoryReadme}
+        loading={isRepositoryReadmeLoading}
+        error={repositoryReadmeError}
+        onClose={() => {
+          setRepositoryReadme(null);
+          setRepositoryReadmeError(null);
+        }}
       />
     </div>
   );

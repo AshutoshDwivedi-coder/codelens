@@ -1,5 +1,5 @@
 import React from 'react';
-import { Search, GitCommit, RefreshCw, Cpu, BookOpen, HelpCircle } from 'lucide-react';
+import { Search, GitCommit, RefreshCw, Cpu, BookOpen } from 'lucide-react';
 import { HealthResponse } from '../api';
 
 interface HeaderProps {
@@ -20,18 +20,15 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenHelpModal,
 }) => {
   return (
-    <header className="bg-[#161b22] border-b border-[#30363d] px-6 py-3.5 flex flex-wrap items-center justify-between gap-4 sticky top-0 z-40 shadow-md">
+    <header className="app-header bg-[#050505] border-b border-[#242525] px-5 py-3 flex flex-wrap items-center justify-between gap-3 sticky top-0 z-40">
       {/* Brand & Logo */}
       <div className="flex items-center space-x-3.5">
-        <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-blue-600 via-indigo-500 to-cyan-400 flex items-center justify-center shadow-lg shadow-blue-500/20">
-          <Search className="w-5 h-5 text-white" />
+        <div className="w-8 h-8 rounded-md bg-[#171613] border border-[#3a3326] flex items-center justify-center">
+          <Search className="w-4 h-4 text-[#d6a85f]" />
         </div>
         <div>
           <div className="flex items-center space-x-2">
-            <h1 className="font-bold text-lg text-white tracking-tight">CodeLens</h1>
-            <span className="text-[11px] font-semibold px-2.5 py-0.5 rounded-full bg-blue-500/10 text-blue-400 border border-blue-500/20">
-              v1.0.0 CPU-Fast
-            </span>
+            <h1 className="font-semibold text-[17px] text-[#e7e4dc] tracking-tight">CodeLens</h1>
           </div>
         </div>
       </div>
@@ -41,17 +38,17 @@ export const Header: React.FC<HeaderProps> = ({
         {/* Help & Guide Button for Non-Engineers */}
         <button
           onClick={onOpenHelpModal}
-          className="flex items-center space-x-1.5 bg-gradient-to-r from-purple-600/20 to-indigo-600/20 hover:from-purple-600/30 hover:to-indigo-600/30 text-purple-200 text-xs font-semibold px-3 py-1.5 rounded-lg border border-purple-500/30 transition-all shadow-sm"
+          className="header-guide flex items-center space-x-1.5 text-gray-400 hover:text-gray-100 text-xs font-medium px-2 py-1.5 rounded-md border border-transparent hover:border-[#30363d] transition-colors"
           title="Open Plain English Guide & Glossary"
         >
-          <BookOpen className="w-3.5 h-3.5 text-purple-400" />
+          <BookOpen className="w-3.5 h-3.5 text-[#a3a09a]" />
           <span>Guide & Glossary</span>
         </button>
 
         {/* Commit / Code Snapshot Selector */}
-        <div className="flex items-center space-x-2 bg-[#0d1117] border border-[#30363d] rounded-lg px-3 py-1.5 text-xs text-gray-300">
-          <GitCommit className="w-4 h-4 text-purple-400" />
-          <span className="text-gray-400">Snapshot:</span>
+        <div className="flex items-center space-x-2 bg-[#080909] border border-[#242525] rounded-lg px-3 py-1.5 text-xs text-gray-300">
+          <GitCommit className="w-3.5 h-3.5 text-[#d6a85f]" />
+          <span className="text-gray-400">Snapshot</span>
           <select
             value={selectedCommit}
             onChange={(e) => onSelectCommit(e.target.value)}
@@ -70,19 +67,19 @@ export const Header: React.FC<HeaderProps> = ({
         {/* Index Action Button */}
         <button
           onClick={onOpenIndexModal}
-          className="flex items-center space-x-1.5 bg-[#21262d] hover:bg-[#30363d] text-gray-200 text-xs font-medium px-3 py-1.5 rounded-lg border border-[#30363d] transition-colors"
+          className="flex items-center space-x-1.5 bg-[#121313] hover:bg-[#1a1b1a] text-gray-200 text-xs font-medium px-3 py-1.5 rounded-lg border border-[#242525] transition-colors"
           title="Index a new repository folder"
         >
-          <RefreshCw className="w-3.5 h-3.5 text-blue-400" />
+          <RefreshCw className="w-3.5 h-3.5 text-[#d6a85f]" />
           <span>Rebuild Index</span>
         </button>
 
         {/* System Health Indicator */}
-        <div className="hidden md:flex items-center space-x-2 bg-[#0d1117] border border-[#30363d] rounded-lg px-3 py-1.5 text-xs">
-          <Cpu className="w-3.5 h-3.5 text-emerald-400" />
+        <div className="hidden md:flex items-center space-x-2 bg-transparent border border-transparent rounded-lg px-2 py-1.5 text-xs">
+          <Cpu className="w-3.5 h-3.5 text-[#777777]" />
           {health ? (
             <div className="flex items-center space-x-1.5">
-              <span className="inline-block w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+              <span className="inline-block w-1.5 h-1.5 rounded-full bg-[#4faf73]"></span>
               <span className="text-gray-300 font-medium">System Ready</span>
             </div>
           ) : (

@@ -1,44 +1,64 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { X, RefreshCw, Folder, CheckCircle, AlertTriangle, Play, Cpu } from 'lucide-react';
-import { startIndexing } from '../api';
+import { getIndexingStatus, startIndexing } from '../api';
 
 interface IndexingModalProps {
   isOpen: boolean;
   onClose: () => void;
   onIndexingComplete: (repoPath?: string) => void;
+  initialRepoPath?: string;
+  autoStart?: boolean;
 }
 
 export const IndexingModal: React.FC<IndexingModalProps> = ({
   isOpen,
   onClose,
   onIndexingComplete,
+  initialRepoPath = '',
+  autoStart = false,
 }) => {
-  const [repoPath, setRepoPath] = useState('');
+  const [repoPath, setRepoPath] = useState(initialRepoPath);
   const [status, setStatus] = useState<'idle' | 'indexing' | 'success' | 'error'>('idle');
   const [message, setMessage] = useState<string | null>(null);
 
-  if (!isOpen) return null;
-
-  const handleIndex = async () => {
+  const handleIndex = async (pathOverride?: string) => {
     setStatus('indexing');
     setMessage('Parsing AST, chunking code, generating ONNX embeddings & BM25 indices...');
-    const targetPath = repoPath.trim() || undefined;
+    const targetPath = (pathOverride ?? repoPath).trim() || undefined;
     try {
       const res = await startIndexing(targetPath);
+      let job = await getIndexingStatus(res.job_id);
+      while (job.status === 'pending' || job.status === 'running') {
+        setMessage(job.progress || 'Indexing repository...');
+        await new Promise((resolve) => window.setTimeout(resolve, 1000));
+        job = await getIndexingStatus(res.job_id);
+      }
+      if (job.status === 'error') throw new Error(job.error || 'Indexing failed');
       setStatus('success');
-      setMessage(`Indexing completed! Job ID: ${res.job_id}`);
-      setTimeout(() => {
-        onIndexingComplete(targetPath);
+      setMessage('Indexing completed. Searching the repository...');
+      onIndexingComplete(targetPath);
+      window.setTimeout(() => {
         onClose();
         setStatus('idle');
         setMessage(null);
         setRepoPath('');
-      }, 1500);
+      }, 800);
     } catch (err: any) {
       setStatus('error');
       setMessage(err.message || 'Indexing failed');
     }
   };
+
+  useEffect(() => {
+    setRepoPath(initialRepoPath);
+  }, [initialRepoPath, isOpen]);
+
+  useEffect(() => {
+    if (isOpen && autoStart && initialRepoPath && status === 'idle') void handleIndex(initialRepoPath);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen, autoStart, initialRepoPath]);
+
+  if (!isOpen) return null;
 
   return (
     <div className="fixed inset-0 bg-black/75 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-fadeIn">
@@ -107,7 +127,7 @@ export const IndexingModal: React.FC<IndexingModalProps> = ({
 
           {/* Submit Button */}
           <button
-            onClick={handleIndex}
+            onClick={() => void handleIndex()}
             disabled={status === 'indexing'}
             className="w-full bg-blue-600 hover:bg-blue-500 disabled:bg-blue-800 text-white font-medium py-2.5 rounded-xl transition-colors flex items-center justify-center space-x-2 text-xs shadow-lg shadow-blue-600/20"
           >

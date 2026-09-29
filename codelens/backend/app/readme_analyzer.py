@@ -15,6 +15,8 @@ import logging
 import os
 import re
 import subprocess
+import shutil
+import uuid
 import urllib.request
 import urllib.error
 from pathlib import Path
@@ -128,13 +130,22 @@ def clone_git_repo(repo_url: str) -> Tuple[bool, str, Path]:
         clone_url = f"https://github.com/{owner}/{repo}.git"
 
     try:
-        cmd = ["git", "clone", "--depth", "1", clone_url, str(target_dir)]
+        # README analysis may have already cached a README in target_dir.
+        # Clone to a fresh sibling and merge it in so that this cache does not
+        # make `git clone` fail with a non-empty destination.
+        clone_dir = target_dir.with_name(f".{target_dir.name}-{uuid.uuid4().hex[:8]}")
+        cmd = ["git", "clone", "--depth", "1", clone_url, str(clone_dir)]
         proc = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
         if proc.returncode == 0:
+            shutil.copytree(clone_dir, target_dir, dirs_exist_ok=True)
+            shutil.rmtree(clone_dir, ignore_errors=True)
             return True, "Repository cloned successfully", target_dir
         else:
+            shutil.rmtree(clone_dir, ignore_errors=True)
             return False, f"Git clone failed: {proc.stderr}", target_dir
     except Exception as exc:
+        if 'clone_dir' in locals():
+            shutil.rmtree(clone_dir, ignore_errors=True)
         return False, f"Error cloning repository: {exc}", target_dir
 
 

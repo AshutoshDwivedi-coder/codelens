@@ -59,6 +59,7 @@ class SearchResult(BaseModel):
     score_breakdown: ScoreBreakdown
     other_versions: list[OtherVersion] = []
     tags: dict = {}
+    repo_name: str = ""
 
 
 class SearchResponse(BaseModel):
@@ -70,6 +71,7 @@ class SearchResponse(BaseModel):
     results: list[SearchResult]
     timings: TimingBreakdown
     config_used: dict
+    error: Optional[str] = None
 
 
 class SearchRequest(BaseModel):
@@ -84,6 +86,8 @@ class SearchRequest(BaseModel):
     hybrid: Optional[bool] = None
     clean: Optional[bool] = None
     top_k: int = 10
+    repo_filter: Optional[str] = None
+    alpha: Optional[float] = None
 
 
 @router.post("/search", response_model=SearchResponse)
@@ -102,6 +106,7 @@ async def post_search(body: SearchRequest):
         hybrid=use_h,
         clean=body.clean,
         top_k=body.top_k,
+        repo_filter=body.repo_filter,
     )
 
 
@@ -115,6 +120,7 @@ async def search(
     hybrid: Optional[bool] = Query(None, description="Override hybrid (BM25+dense) toggle"),
     clean: Optional[bool] = Query(None, description="Override query cleaning toggle"),
     top_k: int = Query(10, ge=1, le=50, description="Number of results to return"),
+    repo_filter: Optional[str] = Query(None, description="Comma-separated repo names to search"),
 ):
     """
     Main code search endpoint.
@@ -149,6 +155,7 @@ async def search(
             version=version,
             lang_filter=lang,
             type_filter=type,
+            repo_filter=repo_filter,
             top_k=top_k,
             config_overrides=overrides,
             timings=timings,
@@ -188,9 +195,11 @@ async def search(
                     OtherVersion(**v) for v in r.get("other_versions", [])
                 ],
                 tags=r.get("tags", {}),
+                repo_name=r.get("repo_name") or (r.get("tags") or {}).get("repo_name") or "",
             )
             for r in result.get("results", [])
         ],
         timings=TimingBreakdown(**{k: v for k, v in timings.items() if k in TimingBreakdown.model_fields}),
         config_used=result.get("config_used", {}),
+        error=result.get("error"),
     )

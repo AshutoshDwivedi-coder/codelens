@@ -82,10 +82,20 @@ async def _run_index_job(job_id: str, req: IndexRequest) -> None:
     t_start = time.time()
 
     try:
+        from app.readme_analyzer import is_remote_git_url, clone_git_repo
+        repo_path = req.repo_path
+        if is_remote_git_url(repo_path):
+            ok, message, local_path = await asyncio.get_event_loop().run_in_executor(
+                None, lambda: clone_git_repo(repo_path)
+            )
+            if not ok:
+                raise RuntimeError(message)
+            repo_path = str(local_path)
+            _update_progress(job_id, f"Cloned repository; indexing {local_path.name}…")
         manifest = await asyncio.get_event_loop().run_in_executor(
             None,
             lambda: build_index_for_repo(
-                repo_path=req.repo_path,
+                repo_path=repo_path,
                 commit_sha=req.commit_sha,
                 force_full=req.force_full,
                 progress_callback=lambda msg: _update_progress(job_id, msg),
@@ -296,31 +306,39 @@ async def list_repos():
     # 1. Discover repos from index snapshots (manifest.json in each snapshot dir)
     indexes_dir = settings.indexes_dir
     if indexes_dir.exists():
-        for snap_dir in sorted(indexes_dir.iterdir(), reverse=True):
+        indexed_entries = []
+        for snap_dir in indexes_dir.iterdir():
             if not snap_dir.is_dir():
                 continue
             manifest_path = snap_dir / "manifest.json"
-            if manifest_path.exists():
-                try:
-                    with open(manifest_path) as fh:
-                        manifest = json.load(fh)
-                    repo_path = manifest.get("repo_path", "")
-                    repo_name = manifest.get("repo_name") or (
-                        Path(repo_path).name if repo_path else snap_dir.name
-                    )
-                    chunk_count = manifest.get("chunk_count", 0)
-                    if repo_name and repo_name not in seen_names:
-                        seen_names.add(repo_name)
-                        repos.append({
-                            "id": repo_name,
-                            "name": repo_name,
-                            "description": f"Indexed codebase · {chunk_count} code chunks",
-                            "path": repo_path or str(snap_dir),
-                            "source": "indexed",
-                            "chunk_count": chunk_count,
-                        })
-                except Exception:
-                    pass
+            if not manifest_path.exists():
+                continue
+            try:
+                with open(manifest_path) as fh:
+                    manifest = json.load(fh)
+                repo_path = manifest.get("repo_path", "")
+                repo_name = manifest.get("repo_name") or (
+                    Path(repo_path).name if repo_path else snap_dir.name
+                )
+                indexed_entries.append((
+                    manifest.get("timestamp", ""),
+                    repo_name,
+                    repo_path or str(snap_dir),
+                    manifest.get("chunk_count", 0),
+                ))
+            except Exception:
+                pass
+        for _, repo_name, repo_path, chunk_count in sorted(indexed_entries, reverse=True):
+            if repo_name and repo_name not in seen_names:
+                seen_names.add(repo_name)
+                repos.append({
+                    "id": repo_name,
+                    "name": repo_name,
+                    "description": f"Indexed codebase · {chunk_count} code chunks",
+                    "path": repo_path,
+                    "source": "indexed",
+                    "chunk_count": chunk_count,
+                })
 
     # 2. Discover demo_repos/ folders
     demo_dir = base_dir / "demo_repos"
@@ -368,12 +386,17 @@ async def health():
     cache = get_cache()
     vm = get_version_manager()
     snapshots = vm.list_snapshots()
-    total_chunks = snapshots[0].get("chunk_count", 0) if snapshots else 0
+    latest_by_repo: dict = {}
+    for snap in snapshots:
+        key = snap.get("repo_name") or snap.get("commit_sha")
+        if key and key not in latest_by_repo:
+            latest_by_repo[key] = snap
+    total_chunks = sum(s.get("chunk_count", 0) for s in latest_by_repo.values())
 
     return {
         "status": "ok",
         "version": "1.0.0",
-        "indexed_repositories": len(snapshots),
+        "indexed_repositories": len(latest_by_repo),
         "total_chunks": total_chunks,
         "model_name": "MiniLM-L6-v2",
         "bm25_active": True,

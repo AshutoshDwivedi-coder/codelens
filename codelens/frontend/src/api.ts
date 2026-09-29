@@ -37,6 +37,7 @@ export interface SearchResponse {
   query: string;
   timing_ms: number;
   total_candidates: number;
+  error?: string | null;
   params?: {
     top_k?: number;
     use_hybrid?: boolean;
@@ -94,8 +95,8 @@ export async function searchCode(params: {
     use_hybrid: params.use_hybrid,
   };
   if (params.commit_id) body.commit_id = params.commit_id;
-  // Note: alpha and repo_filter are not supported by the backend SearchRequest;
-  // they are kept in the params for UI display purposes only.
+  if (params.repo_filter) body.repo_filter = params.repo_filter;
+  if (typeof params.alpha === 'number') body.alpha = params.alpha;
 
   const res = await fetch(apiUrl('/api/search'), {
     method: 'POST',
@@ -153,6 +154,7 @@ export async function searchCode(params: {
     query: raw.query || params.query,
     timing_ms: timingMs,
     total_candidates: totalCandidates,
+    error: typeof raw.error === 'string' ? raw.error : null,
     params: {
       top_k: params.top_k,
       use_hybrid: params.use_hybrid,
@@ -228,6 +230,19 @@ export async function startIndexing(
   return res.json();
 }
 
+export interface IndexJobStatus {
+  job_id: string;
+  status: 'pending' | 'running' | 'done' | 'error';
+  progress: string;
+  error?: string | null;
+}
+
+export async function getIndexingStatus(jobId: string): Promise<IndexJobStatus> {
+  const res = await fetch(`/api/index/status?job_id=${encodeURIComponent(jobId)}`);
+  if (!res.ok) throw new Error('Failed to check indexing progress');
+  return res.json();
+}
+
 export interface RepoInfo {
   id: string;
   name: string;
@@ -267,6 +282,21 @@ export async function analyzeReadme(
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: 'Failed to analyze repository README' }));
     throw new Error(err.detail || 'Failed to analyze repository README');
+  }
+  return res.json();
+}
+export interface RepositoryReadme {
+  repo_name: string;
+  filename: string;
+  content: string;
+}
+
+export async function getRepositoryReadme(repoPath?: string): Promise<RepositoryReadme> {
+  const query = repoPath ? `?repo_path=${encodeURIComponent(repoPath)}` : '';
+  const res = await fetch(apiUrl(`/api/readme/content${query}`));
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: 'Could not open repository README' }));
+    throw new Error(err.detail || 'Could not open repository README');
   }
   return res.json();
 }

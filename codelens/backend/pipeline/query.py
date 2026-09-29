@@ -23,6 +23,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from enum import Enum
+from pathlib import Path
 from typing import Optional
 
 
@@ -223,6 +224,54 @@ class CleanedQuery:
     was_cleaned: bool
 
 
+# Phrases that pad recommended / natural-language questions without helping retrieval
+_NL_FILLER_RE = re.compile(
+    r"\b("
+    r"where\s+is|where\s+are|how\s+does|how\s+do|how\s+are|how\s+is|"
+    r"what\s+is|what\s+are|show\s+me|find|locate|explain|"
+    r"implemented\s+in\s+the\s+codebase|in\s+the\s+codebase|"
+    r"step[- ]by[- ]step|in\s+this\s+codebase|in\s+this\s+repository|"
+    r"the\s+primary\s+role\s+of|defined\s+for|handled\s+in"
+    r")\b",
+    re.IGNORECASE,
+)
+
+
+def extract_search_terms(query: str) -> str:
+    """
+    Rewrite a natural-language / recommended question into retrieval-friendly terms.
+
+    Prefer concrete file paths from backticks and drop filler phrasing so BM25
+    and dense search can match indexed symbols and paths.
+    """
+    paths = re.findall(r"`([^`]+)`", query)
+    # Keep path basename tokens (e.g. payment.py → payment) for keyword match
+    path_tokens: list[str] = []
+    for p in paths:
+        path_tokens.append(p)
+        name = Path(p).stem if "/" in p or "\\" in p or "." in p else p
+        if name and name not in path_tokens:
+            path_tokens.append(name)
+
+    text = query
+    for p in paths:
+        text = text.replace(f"`{p}`", " ")
+    text = _NL_FILLER_RE.sub(" ", text)
+    # Strip question/exclamation marks only — keep dots in file.ext paths
+    text = re.sub(r"[?!]+", " ", text)
+    text = re.sub(r"[^\w\s./\\_+-]", " ", text)
+    text = re.sub(r"\s+", " ", text).strip()
+
+    # Drop very short stop-ish leftovers
+    stop = {
+        "the", "a", "an", "of", "and", "or", "to", "for", "with", "this",
+        "that", "in", "on", "at", "is", "are", "does", "do", "work", "works",
+    }
+    tokens = [t for t in text.split() if t.lower() not in stop and len(t) > 1]
+    combined = " ".join(tokens + path_tokens)
+    return combined.strip() or query.strip()
+
+
 def clean_query(
     query: str,
     *,
@@ -250,6 +299,13 @@ def clean_query(
     # For APPS-style problem statements, strip boilerplate
     if qtype == QueryType.PROBLEM_STMT:
         cleaned = strip_apps_boilerplate(cleaned)
+
+    # Rewrite NL / recommended questions into keyword+path search terms
+    if qtype in (QueryType.WHERE_IS, QueryType.HOW_IT_WORKS, QueryType.GENERAL):
+        if "`" in cleaned or _NL_FILLER_RE.search(cleaned):
+            rewritten = extract_search_terms(cleaned)
+            if rewritten:
+                cleaned = rewritten
 
     # Remove control characters, keep newlines
     cleaned = re.sub(r"[^\x09\x0A\x0D\x20-\x7E\u00A0-\uFFFF]", " ", cleaned)

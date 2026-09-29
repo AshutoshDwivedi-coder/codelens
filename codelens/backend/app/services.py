@@ -67,7 +67,12 @@ def _load_index(version: str) -> Optional[dict]:
         logger.warning("Snapshot not found for version: %s", version)
         return None
 
-    index_data: dict = {"version": version, "dense": None, "bm25": None}
+    index_data: dict = {"version": version, "dense": None, "bm25": None, "manifest": None}
+
+    try:
+        index_data["manifest"] = vm.read_manifest(version)
+    except Exception:
+        pass
 
     # Load dense index
     try:
@@ -84,6 +89,78 @@ def _load_index(version: str) -> Optional[dict]:
         logger.warning("Could not load BM25 index for %s: %s", version, exc)
 
     return index_data
+
+
+def _snapshot_matches_name(snap: dict, name_norm: str) -> bool:
+    snap_name = (snap.get("repo_name") or "").lower()
+    snap_path = (snap.get("repo_path") or "").replace("\\", "/").lower()
+    snap_basename = Path(snap_path).name.lower() if snap_path else ""
+    return (
+        name_norm == snap_name
+        or name_norm == snap_basename
+        or (name_norm and name_norm in snap_path)
+        or snap_name.endswith(name_norm)
+        or Path(name_norm).name == snap_basename
+    )
+
+
+def resolve_repo_version(repo_filter: Optional[str]) -> Optional[str]:
+    """
+    Map a repo name / id / path filter to the best matching snapshot commit SHA.
+    Returns None when filter is empty or no matching snapshot exists.
+    """
+    versions = resolve_search_versions(repo_filter)
+    return versions[0] if versions and repo_filter and repo_filter.strip().lower() not in ("all", "") else (
+        versions[0] if versions else None
+    )
+
+
+def resolve_search_versions(repo_filter: Optional[str] = None) -> list[str]:
+    """
+    Latest snapshot id per repository to search.
+
+    Empty / "all" → one snapshot per indexed repo.
+    Named filter → matching repos only (comma-separated).
+    """
+    from pipeline.versioning import get_version_manager
+
+    vm = get_version_manager()
+    snapshots = vm.list_snapshots()
+    names: list[str] = []
+    if repo_filter and repo_filter.strip().lower() not in ("all", ""):
+        names = [n.strip().lower().replace("\\", "/") for n in repo_filter.split(",") if n.strip()]
+
+    seen_repos: set[str] = set()
+    versions: list[str] = []
+    for snap in snapshots:
+        sha = snap.get("commit_sha")
+        if not sha:
+            continue
+        repo_key = (snap.get("repo_name") or Path(snap.get("repo_path") or "").name or sha).lower()
+        if repo_key in seen_repos:
+            continue
+        if names and not any(_snapshot_matches_name(snap, n) for n in names):
+            continue
+        seen_repos.add(repo_key)
+        versions.append(sha)
+    return versions
+
+
+def _chunk_matches_repo(chunk: dict, repo_names: list[str], repo_paths: list[str]) -> bool:
+    """Return True if chunk belongs to one of the requested repos."""
+    tags = chunk.get("tags") or {}
+    c_repo = (chunk.get("repo_name") or tags.get("repo_name") or "").lower()
+    c_path = (chunk.get("file_path") or "").replace("\\", "/").lower()
+    for name in repo_names:
+        if name and (name == c_repo or name in c_path or c_path.startswith(name + "/")):
+            return True
+    for rpath in repo_paths:
+        if rpath and rpath in c_path:
+            return True
+    # If chunk has no repo metadata, keep it when we already resolved the index snapshot
+    if not c_repo:
+        return True
+    return False
 
 
 def _get_index(version: str) -> Optional[dict]:
@@ -127,6 +204,7 @@ class SearchService:
         version: str = "latest",
         lang_filter: Optional[str] = None,
         type_filter: Optional[str] = None,
+        repo_filter: Optional[str] = None,
         top_k: int = 10,
         config_overrides: Optional[dict] = None,
         timings: Optional[dict] = None,
@@ -143,6 +221,18 @@ class SearchService:
         from pipeline.rerank import rerank
         from pipeline.lineage import group_by_lineage
 
+        # Prefer snapshots that belong to the selected repository (or all repos)
+        repo_snapshot_missing = False
+        search_versions: list[str] = []
+        if version in ("latest", "", None):
+            search_versions = resolve_search_versions(repo_filter)
+            if search_versions:
+                version = search_versions[0]
+            elif repo_filter and repo_filter.strip().lower() not in ("all", ""):
+                repo_snapshot_missing = True
+        else:
+            search_versions = [version]
+
         # Merge config overrides
         cfg = {
             "use_bm25": settings.use_bm25,
@@ -155,6 +245,7 @@ class SearchService:
             "dense_top_k": settings.dense_top_k,
             "rerank_top_k": settings.rerank_top_k,
             "final_top_k": top_k,
+            "repo_filter": repo_filter or "",
         }
         cfg.update(config_overrides)
 
@@ -168,9 +259,7 @@ class SearchService:
             logger.info("Cache hit for query: %.40s…", query)
             return cached
 
-        # 2. Load index
-        index_data = _get_index(version)
-        if index_data is None:
+        if repo_snapshot_missing:
             return {
                 "query": query,
                 "cleaned_query": query,
@@ -179,13 +268,10 @@ class SearchService:
                 "total_results": 0,
                 "results": [],
                 "config_used": cfg,
+                "error": f"Repository {repo_filter!r} is not indexed. Index it first via POST /api/index.",
             }
 
-        resolved_version = index_data["version"]
-        dense_idx = index_data.get("dense")
-        bm25_idx = index_data.get("bm25")
-
-        # 3. Query cleaning
+        # 2–7. Clean, embed, then retrieve from one or more repo snapshots
         t0 = time.perf_counter()
         if cfg["use_query_clean"]:
             cq = clean_query(query)
@@ -196,14 +282,13 @@ class SearchService:
             query_type = "general"
         timings["query_clean_ms"] = round((time.perf_counter() - t0) * 1000, 1)
 
-        # 4. Embed query
         t0 = time.perf_counter()
         enc = _get_encoder()
         try:
-            q_vec = enc.encode([cleaned], show_progress_bar=False)[0]
+            import numpy as np
+            q_vec = np.asarray(enc.encode([cleaned], show_progress_bar=False)[0], dtype=np.float32)
         except Exception as _enc_err:
             logger.warning("Encoder error: %s", _enc_err)
-            # Fallback: return empty results if encoder fails
             return {
                 "query": query,
                 "cleaned_query": cleaned,
@@ -215,37 +300,76 @@ class SearchService:
             }
         timings["embed_ms"] = round((time.perf_counter() - t0) * 1000, 1)
 
-        # 5. BM25 search
-        bm25_results: list = []
-        t0 = time.perf_counter()
-        if cfg["use_bm25"] and bm25_idx is not None:
-            bm25_results = bm25_idx.search(cleaned, top_k=cfg["bm25_top_k"])
-        timings["bm25_ms"] = round((time.perf_counter() - t0) * 1000, 1)
+        if not search_versions:
+            search_versions = [version]
 
-        # 6. Dense search
-        dense_results: list = []
-        t0 = time.perf_counter()
-        if dense_idx is not None:
-            dense_results = dense_idx.search(q_vec, top_k=cfg["dense_top_k"])
-        timings["dense_ms"] = round((time.perf_counter() - t0) * 1000, 1)
+        fused: list = []
+        bm25_ms_acc = 0.0
+        dense_ms_acc = 0.0
+        fusion_ms_acc = 0.0
+        resolved_version = version
 
-        # 7. Fusion (RRF or dense-only)
-        t0 = time.perf_counter()
-        if cfg["use_hybrid"] and bm25_results and dense_results:
-            fused = reciprocal_rank_fusion([bm25_results, dense_results])
-        elif dense_results:
-            fused = [(s, dict(c)) for s, c in dense_results]
-            for s, c in fused:
-                c["fused_score"] = float(s)
-        elif bm25_results:
-            fused = [(s, dict(c)) for s, c in bm25_results]
-            for s, c in fused:
-                c["fused_score"] = float(s)
-        else:
-            fused = []
-        timings["fusion_ms"] = round((time.perf_counter() - t0) * 1000, 1)
+        for snap_ver in search_versions:
+            try:
+                index_data = _get_index(snap_ver)
+            except Exception as exc:
+                logger.warning("Failed to load index %s: %s", snap_ver, exc)
+                continue
+            if index_data is None:
+                continue
+            resolved_version = index_data["version"]
+            dense_idx = index_data.get("dense")
+            bm25_idx = index_data.get("bm25")
+            manifest = index_data.get("manifest") or {}
 
-        # 8. Apply language / type filters
+            t0 = time.perf_counter()
+            bm25_results: list = []
+            try:
+                if cfg["use_bm25"] and bm25_idx is not None:
+                    bm25_results = bm25_idx.search(cleaned, top_k=cfg["bm25_top_k"])
+            except Exception as exc:
+                logger.warning("BM25 search failed for %s: %s", snap_ver, exc)
+            bm25_ms_acc += (time.perf_counter() - t0) * 1000
+
+            t0 = time.perf_counter()
+            dense_results: list = []
+            try:
+                if dense_idx is not None:
+                    dense_results = dense_idx.search(q_vec, top_k=cfg["dense_top_k"])
+            except Exception as exc:
+                logger.warning("Dense search failed for %s: %s", snap_ver, exc)
+            dense_ms_acc += (time.perf_counter() - t0) * 1000
+
+            t0 = time.perf_counter()
+            if cfg["use_hybrid"] and bm25_results and dense_results:
+                local_fused = reciprocal_rank_fusion([bm25_results, dense_results])
+            elif dense_results:
+                local_fused = [(s, dict(c)) for s, c in dense_results]
+                for s, c in local_fused:
+                    c["fused_score"] = float(s)
+            elif bm25_results:
+                local_fused = [(s, dict(c)) for s, c in bm25_results]
+                for s, c in local_fused:
+                    c["fused_score"] = float(s)
+            else:
+                local_fused = []
+            fusion_ms_acc += (time.perf_counter() - t0) * 1000
+
+            repo_label = manifest.get("repo_name") or ""
+            for s, c in local_fused:
+                tags = c.get("tags") or {}
+                if not c.get("repo_name"):
+                    c["repo_name"] = tags.get("repo_name") or repo_label
+                fused.append((s, c))
+
+        timings["bm25_ms"] = round(bm25_ms_acc, 1)
+        timings["dense_ms"] = round(dense_ms_acc, 1)
+        timings["fusion_ms"] = round(fusion_ms_acc, 1)
+
+        if len(search_versions) > 1 and fused:
+            fused.sort(key=lambda pair: float(pair[0]), reverse=True)
+
+        # 8. Apply language / type filters (repo already scoped via snapshots)
         if lang_filter:
             fused = [(s, c) for s, c in fused if c.get("language", "").lower() == lang_filter.lower()]
         if type_filter:
@@ -321,34 +445,51 @@ def build_index_for_repo(
         if progress_callback:
             progress_callback(msg)
 
-    repo = Path(repo_path)
+    repo = Path(repo_path).resolve()
     if not repo.exists():
         raise FileNotFoundError(f"Repository not found: {repo_path}")
 
     vm = get_version_manager()
 
-    # Resolve commit SHA
+    # Resolve underlying git commit (may be the parent monorepo HEAD)
     if commit_sha is None:
         commit_sha = vm.get_current_commit(str(repo))
-    if commit_sha == "unknown":
-        # Not a git repo; use a synthetic SHA
-        import hashlib
-        commit_sha = "local-" + hashlib.sha256(str(repo).encode()).hexdigest()[:8]
 
-    _progress(f"Indexing commit {commit_sha[:7]}…")
+    git_toplevel = vm.get_git_toplevel(str(repo))
+    nested_in_other_git = False
+    if git_toplevel:
+        try:
+            nested_in_other_git = Path(git_toplevel).resolve() != repo
+        except Exception:
+            nested_in_other_git = True
+
+    if commit_sha == "unknown" or nested_in_other_git:
+        # Standalone folder or nested demo inside a monorepo — unique path-based id
+        import hashlib
+        commit_sha = "local-" + hashlib.sha256(str(repo).encode()).hexdigest()[:12]
+
+    # Namespace snapshot dirs by repo name so demos never overwrite each other
+    original_commit = commit_sha
+    snapshot_id = vm.make_snapshot_id(str(repo), commit_sha)
+
+    _progress(f"Indexing {repo.name} ({snapshot_id[:40]}…)…")
 
     # Determine files to process
-    if not force_full and vm.has_snapshot(commit_sha):
+    if not force_full and vm.has_snapshot(snapshot_id):
         _progress("Snapshot already exists; nothing to do.")
-        return vm.read_manifest(commit_sha)
+        return vm.read_manifest(snapshot_id)
 
-    # Find previous snapshot for incremental rebuild
-    snapshots = vm.list_snapshots()
+    # Find previous snapshot for THIS repo only (incremental rebuild)
+    snapshots = [
+        s for s in vm.list_snapshots()
+        if (s.get("repo_name") or "").lower() == repo.name.lower()
+        or (s.get("repo_path") or "").replace("\\", "/").lower().endswith("/" + repo.name.lower())
+    ]
     prev_sha = snapshots[0]["commit_sha"] if snapshots else None
     changed_files: Optional[set[str]] = None
 
-    if prev_sha and not force_full and prev_sha != commit_sha:
-        changed_paths = vm.get_changed_files(str(repo), prev_sha, commit_sha)
+    if prev_sha and not force_full and prev_sha != snapshot_id and not nested_in_other_git:
+        changed_paths = vm.get_changed_files(str(repo), snapshots[0].get("original_commit", prev_sha), original_commit)
         if changed_paths:
             changed_files = set(changed_paths)
             _progress(f"Incremental rebuild: {len(changed_files)} changed files")
@@ -374,13 +515,14 @@ def build_index_for_repo(
     for fpath in all_files:
         try:
             source = fpath.read_text(encoding="utf-8", errors="replace")
-            rel_path = str(fpath.relative_to(repo))
+            rel_path = str(fpath.relative_to(repo)).replace("\\", "/")
             lang = detect_language(str(fpath))
             chunks = chunk_file(source, rel_path, language=lang,
                                 max_chunk_tokens=settings.max_chunk_tokens,
                                 min_chunk_lines=settings.min_chunk_lines)
             for c in chunks:
                 c.tags.update(tag_chunk(c, rel_path))
+                c.tags["repo_name"] = repo.name
             all_chunks.extend(chunks)
         except Exception as exc:
             logger.warning("Error chunking %s: %s", fpath, exc)
@@ -400,7 +542,7 @@ def build_index_for_repo(
 
     # Build dense index
     _progress("Building dense index…")
-    snap_dir = vm.snapshot_dir(commit_sha)
+    snap_dir = vm.snapshot_dir(snapshot_id)
     dense_idx, n_embedded, n_cached = build_dense_index(
         all_chunks, encoder, cache=emb_cache,
         batch_size=settings.embed_batch_size,
@@ -418,22 +560,25 @@ def build_index_for_repo(
     build_time = time.time() - t_build_start
     _progress(f"Index built in {build_time:.1f}s ({n_embedded} embedded, {n_cached} cached)")
 
-    commit_msg = vm.get_commit_message(str(repo), commit_sha)
+    commit_msg = vm.get_commit_message(str(repo), original_commit) if not nested_in_other_git else f"Index of {repo.name}"
     manifest = vm.write_manifest(
-        commit_sha=commit_sha,
+        commit_sha=snapshot_id,
         chunk_count=len(all_chunks),
         model_name=encoder.model_name,
         build_time_seconds=build_time,
         n_embedded=n_embedded,
         n_cached=n_cached,
         commit_message=commit_msg,
+        repo_path=str(repo),
+        repo_name=repo.name,
+        original_commit=original_commit,
     )
 
     # Invalidate cached index for this version
-    if commit_sha in _index_cache:
-        del _index_cache[commit_sha]
-        if commit_sha in _index_access:
-            _index_access.remove(commit_sha)
+    if snapshot_id in _index_cache:
+        del _index_cache[snapshot_id]
+        if snapshot_id in _index_access:
+            _index_access.remove(snapshot_id)
 
     return manifest
 
