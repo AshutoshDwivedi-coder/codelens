@@ -1,29 +1,29 @@
-@"
-# Python
-codelens/backend/.venv/
-codelens/backend/__pycache__/
+# Python environments and caches
+/backend/.venv/
+/backend/venv/
 **/__pycache__/
-*.pyc
+*.py[cod]
 
-# Environment variables
+# Local configuration and secrets
 .env
 .env.*
 !.env.example
 
-# Node
-codelens/frontend/node_modules/
-node_modules/
+# Node dependencies and generated builds
+/frontend/node_modules/
+**/node_modules/
+/frontend/dist/
+**/dist/
+**/build/
+**/.next/
 
-# Build files
-dist/
-build/
-.next/
+# Runtime repository clones and generated indexes
+/cloned_repos/
+/indexes/
+/results/
 
-# IDE
+# IDE and operating system files
 .vscode/
 .idea/
-
-# OS
 .DS_Store
 Thumbs.db
-"@ | Out-File -Encoding utf8 .gitignore

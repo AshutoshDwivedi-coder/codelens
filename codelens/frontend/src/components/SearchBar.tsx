@@ -16,6 +16,7 @@ interface SearchBarProps {
   setSelectedRepos: (repos: string[], paths?: Record<string, string>) => void;
   inputRef: React.RefObject<HTMLInputElement | null>;
   onAddRepository?: (repoPath: string) => void;
+  repoListRevision?: number;
 }
 
 export const SearchBar: React.FC<SearchBarProps> = ({
@@ -32,6 +33,7 @@ export const SearchBar: React.FC<SearchBarProps> = ({
   setSelectedRepos,
   inputRef,
   onAddRepository,
+  repoListRevision,
 }) => {
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter') {
@@ -131,6 +133,7 @@ export const SearchBar: React.FC<SearchBarProps> = ({
         {/* Multi / Single / All Repository Dropdown Selector */}
         <RepoSelector
           selectedRepos={selectedRepos}
+          repoListRevision={repoListRevision}
           onChangeSelectedRepos={(repos, paths) => setSelectedRepos(repos, paths)}
           onAddRepository={onAddRepository}
         />

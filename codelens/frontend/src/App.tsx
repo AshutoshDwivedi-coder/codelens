@@ -45,6 +45,7 @@ export function App() {
   const [alpha, setAlpha] = useState(0.5);
   const [topK, setTopK] = useState(10);
   const [selectedRepos, setSelectedRepos] = useState<string[]>([]);
+  const [repoListRevision, setRepoListRevision] = useState(0);
   // Maps repo id → actual filesystem/URL path for README analysis
   const [repoPaths, setRepoPaths] = useState<Record<string, string>>({});
   const [selectedCommit, setSelectedCommit] = useState('HEAD');
@@ -315,6 +316,7 @@ export function App() {
         topK={topK}
         setTopK={setTopK}
         selectedRepos={selectedRepos}
+        repoListRevision={repoListRevision}
         setSelectedRepos={(repos, paths) => {
           setSelectedRepos(repos);
           if (paths) {
@@ -489,6 +491,7 @@ export function App() {
           setAutoStartIndexing(false);
         }}
         onIndexingComplete={(repoPath?: string) => {
+          setRepoListRevision((revision) => revision + 1);
           fetchHealthAndVersions();
           // After indexing a new repo, select it automatically and refresh questions
           if (repoPath && repoPath !== '.') {

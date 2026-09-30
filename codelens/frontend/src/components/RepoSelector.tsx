@@ -7,6 +7,7 @@ interface RepoSelectorProps {
   onChangeSelectedRepos: (repos: string[], repoPaths?: Record<string, string>) => void;
   /** Called when a new repo was just indexed so the parent can refresh */
   onRepoListRefresh?: () => void;
+  repoListRevision?: number;
   onAddRepository?: (repoPath: string) => void;
 }
 
@@ -21,6 +22,7 @@ export const RepoSelector: React.FC<RepoSelectorProps> = ({
   selectedRepos = [],
   onChangeSelectedRepos,
   onRepoListRefresh,
+  repoListRevision = 0,
   onAddRepository,
 }) => {
   const [isOpen, setIsOpen] = useState(false);
@@ -54,7 +56,7 @@ export const RepoSelector: React.FC<RepoSelectorProps> = ({
   // Load on mount + whenever the dropdown opens (so newly-indexed repos appear)
   useEffect(() => {
     loadRepos();
-  }, [loadRepos]);
+  }, [loadRepos, repoListRevision]);
 
   // Close dropdown on click outside
   useEffect(() => {

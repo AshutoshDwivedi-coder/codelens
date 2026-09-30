@@ -62,7 +62,7 @@ benchmarks/             Search and indexing benchmark scripts
 
 ## Run locally
 
-Use Python 3.11 or later and Node.js compatible with the Vite version in `frontend/package.json`.
+Use Python 3.11 or later, Node.js compatible with the Vite version in `frontend/package.json`, and the Git command-line client available on `PATH`. Remote repository indexing needs network access to GitHub; the first index may also download the configured embedding model from Hugging Face.
 
 ### 1. Start the backend
 
@@ -113,7 +113,7 @@ The response includes a `job_id`. Poll `GET /api/index/status?job_id=<job_id>` u
 | `GET /api/search?q=...` | Search using query-string parameters. |
 | `POST /api/index` | Start a background indexing job for a local path or GitHub repository. |
 | `GET /api/index/status?job_id=...` | Read indexing job progress, status, and errors. |
-| `GET /api/repos` | List indexed, demo, and locally cloned repositories. |
+| `GET /api/repos` | List repositories with completed indexes and searchable code chunks. |
 | `GET /api/versions` | List indexed commit snapshots and their metadata. |
 | `GET /api/versions/history/{file_path}` | Read available historical snippets for a file path. |
 | `GET /api/lineage/{lineage_id}` | Read lineage history and diffs for a chunk lineage ID. |

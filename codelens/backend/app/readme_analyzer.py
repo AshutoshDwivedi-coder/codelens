@@ -19,6 +19,7 @@ import shutil
 import uuid
 import urllib.request
 import urllib.error
+from urllib.parse import urlsplit
 from pathlib import Path
 from typing import Optional, List, Dict, Any, Tuple
 
@@ -41,17 +42,27 @@ def is_remote_git_url(repo_path: str) -> bool:
 
 
 def parse_github_owner_repo(repo_url: str) -> Optional[Tuple[str, str]]:
-    """Extract owner and repo name from GitHub URL or owner/repo string."""
-    cleaned = repo_url.strip()
-    # Match https://github.com/owner/repo or git@github.com:owner/repo
-    m = re.search(r"github\.com[/:]([^/]+)/([^/]+?)(?:\.git)?/?$", cleaned)
-    if m:
-        return m.group(1), m.group(2)
-    # Match short format: owner/repo
-    m_short = re.match(r"^([a-zA-Z0-9_\-\.]+)/([a-zA-Z0-9_\-\.]+)$", cleaned)
-    if m_short:
-        return m_short.group(1), m_short.group(2)
-    return None
+    """Extract the repository slug from common public GitHub URL forms."""
+    cleaned = repo_url.strip().strip("'\"")
+
+    if cleaned.lower().startswith("git@github.com:"):
+        path = cleaned.split(":", 1)[1]
+    elif cleaned.lower().startswith(("https://", "http://", "ssh://")):
+        parsed = urlsplit(cleaned)
+        if (parsed.hostname or "").lower() not in {"github.com", "www.github.com"}:
+            return None
+        path = parsed.path
+    else:
+        path = cleaned.split("?", 1)[0].split("#", 1)[0]
+
+    parts = [part for part in path.strip("/").split("/") if part]
+    if len(parts) < 2:
+        return None
+    owner = parts[0]
+    repo = re.sub(r"\.git$", "", parts[1], flags=re.IGNORECASE)
+    if not re.fullmatch(r"[a-zA-Z0-9_.-]+", owner) or not re.fullmatch(r"[a-zA-Z0-9_.-]+", repo):
+        return None
+    return owner, repo
 
 
 def fetch_remote_readme(repo_url: str) -> Optional[Tuple[str, str, Path]]:
@@ -126,7 +137,11 @@ def clone_git_repo(repo_url: str) -> Tuple[bool, str, Path]:
 
     target_dir.mkdir(parents=True, exist_ok=True)
     clone_url = repo_url
-    if not clone_url.startswith(("http://", "https://", "git@")):
+    if parsed:
+        # Normalize .git suffixes, query strings, and GitHub subpage URLs to
+        # the canonical clone URL for the repository itself.
+        clone_url = f"https://github.com/{owner}/{repo}.git"
+    elif not clone_url.startswith(("http://", "https://", "git@", "ssh://")):
         clone_url = f"https://github.com/{owner}/{repo}.git"
 
     try:
@@ -135,7 +150,7 @@ def clone_git_repo(repo_url: str) -> Tuple[bool, str, Path]:
         # make `git clone` fail with a non-empty destination.
         clone_dir = target_dir.with_name(f".{target_dir.name}-{uuid.uuid4().hex[:8]}")
         cmd = ["git", "clone", "--depth", "1", clone_url, str(clone_dir)]
-        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
         if proc.returncode == 0:
             shutil.copytree(clone_dir, target_dir, dirs_exist_ok=True)
             shutil.rmtree(clone_dir, ignore_errors=True)
@@ -359,17 +374,34 @@ def analyze_readme(repo_path: Optional[str] = None) -> Dict[str, Any]:
 
     # 2. Extract Project Summary
     summary = ""
+    in_code_block = False
     for line in lines:
         stripped = line.strip()
+        if stripped.startswith("```"):
+            in_code_block = not in_code_block
+            continue
+        if in_code_block:
+            continue
         if (
             stripped
             and not stripped.startswith("#")
             and not stripped.startswith("-")
-            and not stripped.startswith("*")
+            and not re.match(r"^\*\s+", stripped)
             and not stripped.startswith("`")
+            and not stripped.startswith((">", "$"))
+            and not stripped.startswith(("![", "<img", "<a", "<div", "<p"))
+            and not re.match(r"^\[[^\]]+\]:\s*https?://", stripped, re.IGNORECASE)
+            and not re.match(r"^https?://", stripped, re.IGNORECASE)
+            and not re.match(r"^\[[^\]]+\]\(https?://[^)]+\)$", stripped, re.IGNORECASE)
+            and not (stripped.count("|") >= 2 and re.search(r"!\[[^]]*\]\(", stripped))
             and len(stripped) > 20
         ):
             summary = clean_markdown_inline(stripped)
+            summary = re.sub(r"!\[[^]]*\]\([^)]+\)", "", summary).strip()
+            summary = re.sub(r"\s+", " ", summary)
+            if len(summary) <= 20:
+                summary = ""
+                continue
             break
     if not summary:
         summary = f"{title} repository documentation and codebase architecture overview."
