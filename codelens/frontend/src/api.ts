@@ -1,8 +1,13 @@
 // API client for CodeLens backend
 
 // Leave this empty for local Vite development, where the dev-server proxy
-// forwards /api requests to FastAPI. Set it to the Render service URL in Vercel.
-const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? '').replace(/\/$/, '');
+// forwards /api requests to FastAPI. Vercel deployments can override the
+// production fallback with VITE_API_BASE_URL at build time.
+const DEFAULT_PRODUCTION_API_URL = 'https://codelens-2-v0jy.onrender.com';
+const API_BASE_URL = (
+  import.meta.env.VITE_API_BASE_URL
+  ?? (import.meta.env.PROD ? DEFAULT_PRODUCTION_API_URL : '')
+).replace(/\/$/, '');
 const apiUrl = (path: string) => `${API_BASE_URL}${path}`;
 
 export interface ScoreBreakdown {
