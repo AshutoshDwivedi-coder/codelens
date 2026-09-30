@@ -32,7 +32,72 @@ The current extension map includes Python, JavaScript/JSX, TypeScript/TSX, Go, J
 - **Repository picker:** Discover indexed, demo, and cloned repositories; select search scope or add a local path / GitHub repository.
 - **Status and cache information:** The health endpoint reports index and cache status, repository and chunk counts, and the active embedding model.
 - **Developer guide:** The frontend includes search examples and explanations of concepts such as BM25, dense embeddings, RRF, and AST chunking.
+  
+## Architecture Overview
 
+CodeLens follows a modular frontend-backend architecture designed around repository ingestion, versioned indexing, and hybrid code retrieval.
+
+```text
+                         ┌─────────────────────────┐
+                         │       CodeLens UI       │
+                         │   React + TypeScript    │
+                         └────────────┬────────────┘
+                                      │
+                              REST API requests
+                                      │
+                                      ▼
+                         ┌─────────────────────────┐
+                         │      FastAPI Backend    │
+                         │   API + Job Management  │
+                         └────────────┬────────────┘
+                                      │
+                     ┌────────────────┼────────────────┐
+                     │                │                │
+                     ▼                ▼                ▼
+              Repository         README Analysis   Search API
+              Ingestion          & Project Context       │
+                     │                                  │
+                     ▼                                  ▼
+              ┌─────────────┐                  ┌─────────────────┐
+              │ Git / Local │                  │ Query Processing│
+              │ Repository  │                  │ & Query Cleanup │
+              └──────┬──────┘                  └────────┬────────┘
+                     │                                  │
+                     ▼                                  ▼
+              ┌─────────────┐                  ┌─────────────────┐
+              │ AST-Aware   │                  │ Dense Retrieval │
+              │ Chunking    │                  │    (FAISS)      │
+              │ Tree-sitter │                  └────────┬────────┘
+              └──────┬──────┘                           │
+                     │                                  │
+                     ▼                                  ▼
+              ┌─────────────┐                  ┌─────────────────┐
+              │ Versioned   │                  │ Lexical Search  │
+              │ Snapshots   │                  │     (BM25)      │
+              └──────┬──────┘                  └────────┬────────┘
+                     │                                  │
+                     │                                  ▼
+                     │                         ┌─────────────────┐
+                     │                         │  RRF Fusion +   │
+                     │                         │    Reranking    │
+                     │                         └────────┬────────┘
+                     │                                  │
+                     └──────────────────────────────────┤
+                                                        ▼
+                                               ┌─────────────────┐
+                                               │ Ranked Results  │
+                                               │ + Metadata +    │
+                                               │ Score Details   │
+                                               └────────┬────────┘
+                                                        │
+                                                        ▼
+                                               ┌─────────────────┐
+                                               │   CodeLens UI   │
+                                               │ Inspect / Copy /│
+                                               │ History / Search│
+                                               └─────────────────┘
+
+```
 ## How search works
 
 1. CodeLens resolves the requested repository and snapshot.
@@ -59,7 +124,6 @@ indexes/                Generated versioned index snapshots (not source files)
 results/                Evaluation and benchmark output
 benchmarks/             Search and indexing benchmark scripts
 ```
-
 ## Run locally
 
 Use Python 3.11–3.12, Node.js compatible with the Vite version in `frontend/package.json`, and the Git command-line client available on `PATH`. Remote repository indexing needs network access to GitHub; the first index may also download the configured embedding model from Hugging Face.
@@ -198,6 +262,3 @@ Benchmark and evaluation scripts are in `benchmarks/`. Backend tests are in `bac
 python -m pytest
 ```
 
-## License
-
-No license file is currently included. Add a license before redistributing CodeLens if you need to grant reuse rights.
