@@ -144,6 +144,3 @@ Benchmark and evaluation scripts are in `benchmarks/`. Backend tests are in `bac
 python -m pytest
 ```
 
-## License
-
-No license file is currently included. Add a license before redistributing CodeLens if you need to grant reuse rights.
