@@ -123,7 +123,7 @@ demo_repos/             Small repositories for trying the app
 indexes/                Generated versioned index snapshots (not source files)
 results/                Evaluation and benchmark output
 benchmarks/             Search and indexing benchmark scripts
-
+```
 ## Run locally
 
 Use Python 3.11 or later, Node.js compatible with the Vite version in `frontend/package.json`, and the Git command-line client available on `PATH`. Remote repository indexing needs network access to GitHub; the first index may also download the configured embedding model from Hugging Face.
