@@ -96,6 +96,8 @@ CodeLens follows a modular frontend-backend architecture designed around reposit
                                                │ Inspect / Copy /│
                                                │ History / Search│
                                                └─────────────────┘
+
+```
 ## How search works
 
 1. CodeLens resolves the requested repository and snapshot.
@@ -121,7 +123,6 @@ demo_repos/             Small repositories for trying the app
 indexes/                Generated versioned index snapshots (not source files)
 results/                Evaluation and benchmark output
 benchmarks/             Search and indexing benchmark scripts
-```
 
 ## Run locally
 
