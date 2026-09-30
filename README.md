@@ -181,47 +181,7 @@ Once deployed, the application supports adding a public GitHub repository by URL
 
 The backend runtime must have Git available and network access to GitHub. The embedding model may download from Hugging Face on first use. Cloned repositories and generated indexes use runtime storage, so they may need to be recreated if the deployment environment loses its filesystem state.
 
-## Architecture
 
-```mermaid
-flowchart TD
-    User[Developer] --> Query[Natural-language or keyword query]
-    Query --> Frontend[React + TypeScript frontend]
-    Frontend --> API[FastAPI backend]
-
-    API --> SearchAPI[Search API]
-    API --> RepoAPI[Repository API]
-    API --> Readme[README analyzer]
-    API --> Jobs[Indexing jobs]
-    API --> Cache{Cache}
-    Cache --> Redis[Redis optional cache]
-    Cache --> Memory[In-memory cache fallback]
-
-    Repo[Local or public GitHub repository] --> Resolve[Resolve or clone repository]
-    Resolve --> Chunk[Tree-sitter AST-aware chunking]
-    Chunk --> Embed[Embedding generation]
-    Chunk --> Lexical[BM25 lexical index]
-    Embed --> Faiss[FAISS dense index]
-    Faiss --> Snapshot[Versioned index snapshot]
-    Lexical --> Snapshot
-    Snapshot --> SearchAPI
-
-    SearchAPI --> Dense[Dense vector retrieval]
-    SearchAPI --> BM25[BM25 lexical retrieval]
-    Dense --> RRF[Hybrid retrieval with RRF]
-    BM25 --> RRF
-    RRF --> Rerank[Optional reranking]
-    Rerank --> Results[Ranked code snippets]
-    Results --> Frontend
-
-    Jobs --> Resolve
-    Readme --> Repo
-```
-
-1. **Repository ingestion:** CodeLens resolves a local repository or clones a public GitHub repository, then records the source and commit metadata for an index snapshot.
-2. **Code understanding and indexing:** Tree-sitter extracts code-aware chunks; embedding generation, FAISS, and BM25 create dense and lexical retrieval indexes.
-3. **Hybrid retrieval:** The backend combines dense and lexical candidates with Reciprocal Rank Fusion (RRF), then can apply the configured reranker to refine them.
-4. **Ranked result inspection:** The frontend displays ranked snippets with source locations, repository and version context, and available README insights.
 
 ## API overview
 
