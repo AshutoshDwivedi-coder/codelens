@@ -5,7 +5,7 @@ import { getIndexingStatus, startIndexing } from '../api';
 interface IndexingModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onIndexingComplete: (repoPath?: string) => void;
+  onIndexingComplete: (repository?: { id: string; path: string }) => void;
   initialRepoPath?: string;
   autoStart?: boolean;
 }
@@ -39,9 +39,12 @@ export const IndexingModal: React.FC<IndexingModalProps> = ({
       }
       setStatus('success');
       setMessage('Indexing completed. Searching the repository...');
-      // Remote owner/repo inputs are cloned to a local owner_repo folder. Use
-      // the manifest path so the selected repo ID matches the actual index.
-      onIndexingComplete(job.manifest.repo_path || targetPath);
+      // The backend resolves remote URLs to a local clone and records its canonical
+      // repository name. Use that identity for the next search instead of the URL
+      // filename (for example, "Medikiosk.git"), which does not match a snapshot.
+      const indexedPath = job.manifest?.repo_path || targetPath || '';
+      const indexedId = job.manifest?.repo_name || indexedPath.split(/[/\\]/).filter(Boolean).pop() || indexedPath;
+      onIndexingComplete(indexedId ? { id: indexedId, path: indexedPath } : undefined);
       window.setTimeout(() => {
         onClose();
         setStatus('idle');

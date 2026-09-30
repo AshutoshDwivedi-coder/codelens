@@ -4,9 +4,12 @@
 // forwards /api requests to FastAPI. Vercel deployments can override the
 // production fallback with VITE_API_BASE_URL at build time.
 const DEFAULT_PRODUCTION_API_URL = 'https://codelens-2-v0jy.onrender.com';
+// Vercel exposes configured variables as strings. In particular, a variable
+// that exists but has an empty value must not override the Render fallback;
+// otherwise the production app calls Vercel's own /api path instead.
+const configuredApiUrl = import.meta.env.VITE_API_BASE_URL?.trim();
 const API_BASE_URL = (
-  import.meta.env.VITE_API_BASE_URL
-  ?? (import.meta.env.PROD ? DEFAULT_PRODUCTION_API_URL : '')
+  configuredApiUrl || (import.meta.env.PROD ? DEFAULT_PRODUCTION_API_URL : '')
 ).replace(/\/$/, '');
 const apiUrl = (path: string) => `${API_BASE_URL}${path}`;
 

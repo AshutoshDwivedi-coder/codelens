@@ -490,19 +490,18 @@ export function App() {
           setIsIndexModalOpen(false);
           setAutoStartIndexing(false);
         }}
-        onIndexingComplete={(repoPath?: string) => {
+        onIndexingComplete={(repository) => {
           setRepoListRevision((revision) => revision + 1);
           fetchHealthAndVersions();
           // After indexing a new repo, select it automatically and refresh questions
-          if (repoPath && repoPath !== '.') {
-            const repoId = repoPath.split(/[/\\]/).filter(Boolean).pop() || repoPath;
-            const newPaths = { ...repoPaths, [repoId]: repoPath };
+          if (repository?.id && repository.path !== '.') {
+            const newPaths = { ...repoPaths, [repository.id]: repository.path };
             setRepoPaths(newPaths);
-            setSelectedRepos([repoId]);
-            fetchReadmeAnalysis([repoId], newPaths);
+            setSelectedRepos([repository.id]);
+            fetchReadmeAnalysis([repository.id], newPaths);
             if (searchAfterIndex) {
               setSearchAfterIndex(null);
-              void handleSearch(searchAfterIndex, repoId);
+              void handleSearch(searchAfterIndex, repository.id);
             }
           } else {
             fetchReadmeAnalysis(selectedRepos);

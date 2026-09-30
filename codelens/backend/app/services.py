@@ -95,12 +95,21 @@ def _snapshot_matches_name(snap: dict, name_norm: str) -> bool:
     snap_name = (snap.get("repo_name") or "").lower()
     snap_path = (snap.get("repo_path") or "").replace("\\", "/").lower()
     snap_basename = Path(snap_path).name.lower() if snap_path else ""
+    # A repository selected from a GitHub URL can arrive as either the full URL
+    # or its final path component (for example, "owner/repo.git" or
+    # "repo.git"). Snapshots use the cloned folder name, so normalise the
+    # display-only Git suffix before comparing identities.
+    normalized_filter = name_norm.rstrip("/")
+    if normalized_filter.endswith(".git"):
+        normalized_filter = normalized_filter[:-4]
+    filter_basename = Path(normalized_filter).name
     return (
-        name_norm == snap_name
-        or name_norm == snap_basename
-        or (name_norm and name_norm in snap_path)
-        or snap_name.endswith(name_norm)
-        or Path(name_norm).name == snap_basename
+        normalized_filter == snap_name
+        or normalized_filter == snap_basename
+        or (normalized_filter and normalized_filter in snap_path)
+        or snap_name.endswith(normalized_filter)
+        or filter_basename == snap_basename
+        or snap_name.endswith(filter_basename)
     )
 
 

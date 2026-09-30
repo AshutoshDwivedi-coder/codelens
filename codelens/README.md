@@ -1,6 +1,6 @@
 # CodeLens
 
-CodeLens is a local-first code search tool for finding and inspecting relevant source code in one or more repositories. Search with a plain-language question, a symbol name, or exact technical terms; then review the ranked code snippets, file locations, and match details in the web interface.
+CodeLens lets developers search unfamiliar codebases using natural language or exact technical terms and retrieve relevant source-code snippets without manually navigating the repository. It is a local-first code retrieval and search tool for finding and inspecting relevant code across one or more repositories.
 
 The project includes a React + TypeScript frontend and a FastAPI backend. Repositories are indexed into versioned snapshots that contain code chunks and lexical and vector search indexes. The retrieval pipeline is CPU-capable and can use Redis when available, with an in-memory cache fallback.
 
@@ -62,7 +62,7 @@ benchmarks/             Search and indexing benchmark scripts
 
 ## Run locally
 
-Use Python 3.11 or later, Node.js compatible with the Vite version in `frontend/package.json`, and the Git command-line client available on `PATH`. Remote repository indexing needs network access to GitHub; the first index may also download the configured embedding model from Hugging Face.
+Use Python 3.11–3.12, Node.js compatible with the Vite version in `frontend/package.json`, and the Git command-line client available on `PATH`. Remote repository indexing needs network access to GitHub; the first index may also download the configured embedding model from Hugging Face.
 
 ### 1. Start the backend
 
@@ -104,6 +104,60 @@ Invoke-RestMethod -Method Post `
 The response includes a `job_id`. Poll `GET /api/index/status?job_id=<job_id>` until its status is `done` or `error`, then search the indexed repository.
 
 > The first indexing or search operation may take longer while the configured embedding model is loaded or downloaded. Runtime speed depends on the repository size, model, and hardware; CodeLens does not guarantee a fixed search latency.
+
+## Live Demo
+
+Deployment URLs have not been confirmed yet, so these are placeholders rather than live links:
+
+- Frontend: [Vercel URL — add after deployment]
+- Backend API: [Render URL — add after deployment]
+- API Documentation: [Render URL — add after deployment]/docs
+
+Once deployed, the application supports adding a public GitHub repository by URL, cloning and indexing it, natural-language and keyword code search, repository and version selection, and README-based repository insights.
+
+The backend runtime must have Git available and network access to GitHub. The embedding model may download from Hugging Face on first use. Cloned repositories and generated indexes use runtime storage, so they may need to be recreated if the deployment environment loses its filesystem state.
+
+## Architecture
+
+```mermaid
+flowchart TD
+    User[Developer] --> Query[Natural-language or keyword query]
+    Query --> Frontend[React + TypeScript frontend]
+    Frontend --> API[FastAPI backend]
+
+    API --> SearchAPI[Search API]
+    API --> RepoAPI[Repository API]
+    API --> Readme[README analyzer]
+    API --> Jobs[Indexing jobs]
+    API --> Cache{Cache}
+    Cache --> Redis[Redis optional cache]
+    Cache --> Memory[In-memory cache fallback]
+
+    Repo[Local or public GitHub repository] --> Resolve[Resolve or clone repository]
+    Resolve --> Chunk[Tree-sitter AST-aware chunking]
+    Chunk --> Embed[Embedding generation]
+    Chunk --> Lexical[BM25 lexical index]
+    Embed --> Faiss[FAISS dense index]
+    Faiss --> Snapshot[Versioned index snapshot]
+    Lexical --> Snapshot
+    Snapshot --> SearchAPI
+
+    SearchAPI --> Dense[Dense vector retrieval]
+    SearchAPI --> BM25[BM25 lexical retrieval]
+    Dense --> RRF[Hybrid retrieval with RRF]
+    BM25 --> RRF
+    RRF --> Rerank[Optional reranking]
+    Rerank --> Results[Ranked code snippets]
+    Results --> Frontend
+
+    Jobs --> Resolve
+    Readme --> Repo
+```
+
+1. **Repository ingestion:** CodeLens resolves a local repository or clones a public GitHub repository, then records the source and commit metadata for an index snapshot.
+2. **Code understanding and indexing:** Tree-sitter extracts code-aware chunks; embedding generation, FAISS, and BM25 create dense and lexical retrieval indexes.
+3. **Hybrid retrieval:** The backend combines dense and lexical candidates with Reciprocal Rank Fusion (RRF), then can apply the configured reranker to refine them.
+4. **Ranked result inspection:** The frontend displays ranked snippets with source locations, repository and version context, and available README insights.
 
 ## API overview
 
