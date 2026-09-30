@@ -356,7 +356,11 @@ def analyze_readme(repo_path: Optional[str] = None) -> Dict[str, Any]:
             },
         }
 
-    lines = content.splitlines()
+    # Badge blocks and repository widgets are often wrapped in HTML comments.
+    # Keep them out of the generated summary and README-derived insights so a
+    # commented badge cannot be mistaken for the repository description.
+    analysis_content = re.sub(r"<!--.*?-->", "", content, flags=re.DOTALL)
+    lines = analysis_content.splitlines()
 
     # 1. Extract Project Title
     title = ""
