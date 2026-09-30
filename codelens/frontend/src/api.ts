@@ -235,10 +235,15 @@ export interface IndexJobStatus {
   status: 'pending' | 'running' | 'done' | 'error';
   progress: string;
   error?: string | null;
+  manifest?: {
+    repo_name?: string;
+    repo_path?: string;
+    chunk_count?: number;
+  } | null;
 }
 
 export async function getIndexingStatus(jobId: string): Promise<IndexJobStatus> {
-  const res = await fetch(`/api/index/status?job_id=${encodeURIComponent(jobId)}`);
+  const res = await fetch(apiUrl(`/api/index/status?job_id=${encodeURIComponent(jobId)}`));
   if (!res.ok) throw new Error('Failed to check indexing progress');
   return res.json();
 }

@@ -292,8 +292,7 @@ async def get_history_by_path_route(
 @router.get("/repos")
 async def list_repos():
     """
-    List all repositories that have been indexed or cloned locally.
-    Returns repos discovered from: indexes directory manifests, demo_repos/, and cloned_repos/.
+    List repositories with completed indexes only.
     """
     from app.config import settings
     import json
@@ -301,9 +300,7 @@ async def list_repos():
     repos = []
     seen_names: set[str] = set()
 
-    base_dir = settings.base_dir
-
-    # 1. Discover repos from index snapshots (manifest.json in each snapshot dir)
+    # Discover repos from index snapshots (manifest.json in each snapshot dir).
     indexes_dir = settings.indexes_dir
     if indexes_dir.exists():
         indexed_entries = []
@@ -338,38 +335,6 @@ async def list_repos():
                     "path": repo_path,
                     "source": "indexed",
                     "chunk_count": chunk_count,
-                })
-
-    # 2. Discover demo_repos/ folders
-    demo_dir = base_dir / "demo_repos"
-    if demo_dir.exists():
-        for d in sorted(demo_dir.iterdir()):
-            if d.is_dir() and d.name not in seen_names:
-                seen_names.add(d.name)
-                repos.append({
-                    "id": d.name,
-                    "name": d.name,
-                    "description": "Demo repository",
-                    "path": str(d),
-                    "source": "demo",
-                    "chunk_count": 0,
-                })
-
-    # 3. Discover cloned_repos/ folders (GitHub repos cloned via indexing)
-    cloned_dir = base_dir / "cloned_repos"
-    if cloned_dir.exists():
-        for d in sorted(cloned_dir.iterdir()):
-            if d.is_dir() and d.name not in seen_names:
-                seen_names.add(d.name)
-                # Convert folder name owner_repo back to owner/repo format
-                display_name = d.name.replace("_", "/", 1) if "_" in d.name else d.name
-                repos.append({
-                    "id": d.name,
-                    "name": display_name,
-                    "description": "Cloned GitHub repository",
-                    "path": str(d),
-                    "source": "cloned",
-                    "chunk_count": 0,
                 })
 
     return {"repos": repos}

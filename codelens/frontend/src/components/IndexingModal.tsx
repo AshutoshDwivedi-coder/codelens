@@ -34,9 +34,14 @@ export const IndexingModal: React.FC<IndexingModalProps> = ({
         job = await getIndexingStatus(res.job_id);
       }
       if (job.status === 'error') throw new Error(job.error || 'Indexing failed');
+      if (!job.manifest || !job.manifest.chunk_count) {
+        throw new Error('No code chunks were created. Check that the repository contains supported source files, then try again.');
+      }
       setStatus('success');
       setMessage('Indexing completed. Searching the repository...');
-      onIndexingComplete(targetPath);
+      // Remote owner/repo inputs are cloned to a local owner_repo folder. Use
+      // the manifest path so the selected repo ID matches the actual index.
+      onIndexingComplete(job.manifest.repo_path || targetPath);
       window.setTimeout(() => {
         onClose();
         setStatus('idle');

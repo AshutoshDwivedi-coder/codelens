@@ -37,7 +37,7 @@ export const RepoSelector: React.FC<RepoSelectorProps> = ({
     setLoadError(null);
     try {
       const data = await getRepos();
-      const fetched = data.repos || [];
+      const fetched = (data.repos || []).filter((repo) => repo.source === 'indexed' && repo.chunk_count > 0);
       setRepos(fetched);
       // Build path map from fetched repos
       const pathMap: Record<string, string> = {};
@@ -95,26 +95,12 @@ export const RepoSelector: React.FC<RepoSelectorProps> = ({
 
     const newId = trimmed;
     const isPath = trimmed.includes('/') || trimmed.includes('\\') || trimmed.includes(':');
-    const displayName = isPath
-      ? trimmed.split(/[/\\]/).filter(Boolean).pop() || trimmed
-      : trimmed;
-
     if (!repos.some((r) => r.id === newId)) {
-      const newEntry: RepoInfo = {
-        id: newId,
-        name: displayName,
-        description: isPath ? 'Local path' : 'Custom repository identifier',
-        path: isPath ? trimmed : '',
-        source: 'indexed', // will display as 'Custom' via override below
-        chunk_count: 0,
-      };
-      setRepos((prev) => [...prev, newEntry]);
       const extraPaths: Record<string, string> = {};
       if (isPath) extraPaths[newId] = trimmed;
       setRepoPaths((prev) => ({ ...prev, ...extraPaths }));
-      // Switch selection to this new repo immediately
-      notifyChange([newId], extraPaths);
-      onAddRepository?.(isPath ? trimmed : trimmed);
+      // Keep unindexed entries out of the scope list until indexing succeeds.
+      onAddRepository?.(trimmed);
     } else {
       handleToggleRepo(newId);
     }
