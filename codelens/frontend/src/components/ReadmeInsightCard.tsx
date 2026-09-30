@@ -17,6 +17,7 @@ interface ReadmeInsightCardProps {
   isLoading: boolean;
   onRefresh: () => void;
   selectedRepoName: string;
+  selectedRepoCount?: number;
 }
 
 /** Compact architecture overview (questions live in the panel under the search bar). */
@@ -25,6 +26,7 @@ export const ReadmeInsightCard: React.FC<ReadmeInsightCardProps> = ({
   isLoading,
   onRefresh,
   selectedRepoName,
+  selectedRepoCount = 1,
 }) => {
   const [isExpanded, setIsExpanded] = React.useState(false);
 
@@ -55,9 +57,11 @@ export const ReadmeInsightCard: React.FC<ReadmeInsightCardProps> = ({
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
               <h3 className="font-bold text-sm text-gray-100 tracking-tight">
-                {analysis.title || `${selectedRepoName} Architecture`}
+                {selectedRepoCount > 1
+                  ? `${selectedRepoCount} repositories selected`
+                  : analysis.title || `${selectedRepoName} Architecture`}
               </h3>
-              {analysis.has_readme ? (
+              {selectedRepoCount > 1 ? null : analysis.has_readme ? (
                 <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-mono bg-emerald-500/10 text-emerald-300 border border-emerald-500/30">
                   <FileCode2 className="w-3 h-3" />
                   {analysis.filename || 'README.md'}

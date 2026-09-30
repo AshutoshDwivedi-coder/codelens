@@ -235,7 +235,7 @@ def resolve_repo_dir(repo_path: Optional[str] = None) -> Tuple[Path, Optional[st
 
 
 def find_readme_file(target_dir: Path) -> Optional[Path]:
-    """Search target directory, its subdirectories, and its parents for a README file."""
+    """Find a README in this repository without borrowing one from a parent repo."""
     readme_names = [
         "README.md", "readme.md", "README.markdown", "readme.markdown",
         "README.rst", "readme.rst", "README.txt", "readme.txt",
@@ -248,6 +248,25 @@ def find_readme_file(target_dir: Path) -> Optional[Path]:
         if candidate.exists() and candidate.is_file():
             return candidate
 
+    # Some repositories use a descriptive filename such as README_BLOCKING.md.
+    # Accept these only after the standard README names have been checked.
+    try:
+        named_readmes = [
+            candidate for candidate in target_dir.iterdir()
+            if candidate.is_file() and candidate.name.lower().startswith("readme")
+        ]
+        if named_readmes:
+            extension_priority = {".md": 0, ".markdown": 1, ".rst": 2, ".txt": 3}
+            return min(
+                named_readmes,
+                key=lambda candidate: (
+                    extension_priority.get(candidate.suffix.lower(), 4),
+                    candidate.name.lower(),
+                ),
+            )
+    except OSError:
+        pass
+
     # 2. Check immediate docs/ or documentation/ subdirectories
     for sub in ["docs", "documentation"]:
         sub_dir = target_dir / sub
@@ -256,17 +275,6 @@ def find_readme_file(target_dir: Path) -> Optional[Path]:
                 candidate = sub_dir / name
                 if candidate.exists() and candidate.is_file():
                     return candidate
-
-    # 3. Check parent directories up to workspace root
-    curr = target_dir.parent
-    depth = 0
-    while curr.exists() and curr != curr.parent and depth < 3:
-        for name in readme_names:
-            candidate = curr / name
-            if candidate.exists() and candidate.is_file():
-                return candidate
-        curr = curr.parent
-        depth += 1
 
     return None
 

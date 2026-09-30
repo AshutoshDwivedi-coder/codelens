@@ -54,7 +54,7 @@ export const CodebaseSummary: React.FC<CodebaseSummaryProps> = ({
             <div className="project-selected-repos" aria-label={repoScopeLabel}>
               <span className="project-selected-repos-label">{repoScopeLabel}</span>
               <div className="project-selected-repos-list">
-                {selectedRepoNames.map((name) => <span className="project-selected-repo" key={name} title={name}>{name}</span>)}
+                {selectedRepoNames.map((name, index) => <span className="project-selected-repo" key={`${name}-${index}`} title={name}>{name}</span>)}
               </div>
             </div>
           )}

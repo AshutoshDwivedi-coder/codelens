@@ -134,12 +134,15 @@ export function App() {
 
   useEffect(() => {
     let cancelled = false;
-    if (selectedRepos.length < 2) {
+    const descriptionRepoIds = selectedRepos.length === 0
+      ? availableRepos.filter((repo) => repo.source === 'indexed').map((repo) => repo.id)
+      : selectedRepos;
+    if (descriptionRepoIds.length < 2) {
       setSelectedRepoDescriptions([]);
       return () => { cancelled = true; };
     }
 
-    const selected = selectedRepos.map((id) => {
+    const selected = descriptionRepoIds.map((id) => {
       const repo = availableRepos.find((item) => item.id === id);
       return {
         id,
@@ -278,7 +281,11 @@ export function App() {
         </nav>
         <div className="sidebar-project-label">PROJECT</div>
         <CodebaseSummary
-        title={selectedRepos.length > 1 ? `${selectedRepos.length} repositories selected` : readmeAnalysis?.title || `${currentRepoDisplayName} Overview`}
+        title={sidebarRepositories.length > 1
+          ? selectedRepos.length === 0
+            ? `${sidebarRepositories.length} indexed repositories`
+            : `${sidebarRepositories.length} repositories selected`
+          : readmeAnalysis?.title || `${currentRepoDisplayName} Overview`}
         summary={
           readmeAnalysis?.summary ||
           'Select a repository to see a short summary of what it does and how it is structured.'
@@ -348,6 +355,7 @@ export function App() {
           isLoading={isReadmeLoading}
           onRefresh={() => fetchReadmeAnalysis(selectedRepos)}
           selectedRepoName={currentRepoDisplayName}
+          selectedRepoCount={sidebarRepositories.length}
         />
 
         {/* Search Telemetry Bar */}
