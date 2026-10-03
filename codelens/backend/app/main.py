@@ -80,16 +80,43 @@ app.include_router(index_router, prefix="/api")
 app.include_router(readme_router, prefix="/api")
 
 
-# ──────────────────────────── Root ────────────────────────────────────────
+# ──────────────────────────── Frontend Serving ────────────────────────────
+import os
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 
-@app.get("/")
-async def root():
-    return {
-        "name": "CodeLens",
-        "version": "1.0.0",
-        "docs": "/docs",
-        "health": "/api/health",
-    }
+# Path to the built frontend (relative to the backend directory where uvicorn is run)
+FRONTEND_DIST = os.path.join(os.path.dirname(__file__), "../../frontend/dist")
+
+if os.path.isdir(FRONTEND_DIST):
+    # Mount the 'assets' directory or other static files
+    app.mount("/assets", StaticFiles(directory=os.path.join(FRONTEND_DIST, "assets")), name="assets")
+
+    # Serve files like vite.svg, etc., if needed, though they might be in root
+    # A cleaner approach for SPA is to catch all non-API routes:
+    @app.get("/{full_path:path}")
+    async def serve_spa(full_path: str):
+        # Allow requests to /api/health to pass through (or let FastAPI handle prior routes)
+        if full_path.startswith("api/"):
+            return JSONResponse(status_code=404, content={"error": "Not found"})
+        
+        # Check if the exact file exists in dist (e.g. /vite.svg, /favicon.ico)
+        file_path = os.path.join(FRONTEND_DIST, full_path)
+        if os.path.isfile(file_path):
+            return FileResponse(file_path)
+            
+        # Fallback to index.html for SPA routing
+        return FileResponse(os.path.join(FRONTEND_DIST, "index.html"))
+else:
+    @app.get("/")
+    async def root():
+        return {
+            "name": "CodeLens",
+            "version": "1.0.0",
+            "docs": "/docs",
+            "health": "/api/health",
+            "note": "Frontend dist directory not found. Please build the frontend."
+        }
 
 
 # ──────────────────────────── Exception handler ────────────────────────────
