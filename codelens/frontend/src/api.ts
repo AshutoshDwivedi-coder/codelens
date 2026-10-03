@@ -3,7 +3,7 @@
 // Leave this empty for local Vite development, where the dev-server proxy
 // forwards /api requests to FastAPI. Vercel deployments can override the
 // production fallback with VITE_API_BASE_URL at build time.
-const DEFAULT_PRODUCTION_API_URL = 'https://codelens-2-v0jy.onrender.com';
+const DEFAULT_PRODUCTION_API_URL = 'https://codelens-app.onrender.com';
 // Vercel exposes configured variables as strings. In particular, a variable
 // that exists but has an empty value must not override the Render fallback;
 // otherwise the production app calls Vercel's own /api path instead.
@@ -112,8 +112,18 @@ export async function searchCode(params: {
     body: JSON.stringify(body),
   });
   if (!res.ok) {
-    const err = await res.json().catch(() => ({ detail: res.statusText }));
-    throw new Error(err.detail || 'Search request failed');
+    let detail = '';
+    try {
+      const err = await res.json();
+      detail = typeof err.detail === 'string' ? err.detail : (typeof err.error === 'string' ? err.error : '');
+    } catch {
+      if (res.status === 502 || res.status === 503 || res.status === 504) {
+        detail = 'Backend service is starting up or temporarily busy. Please retry in a few seconds.';
+      } else {
+        detail = res.statusText || `Request failed with status ${res.status}`;
+      }
+    }
+    throw new Error(detail || 'Search request failed');
   }
   const raw = await res.json();
   const rawResults: any[] = raw.results || [];

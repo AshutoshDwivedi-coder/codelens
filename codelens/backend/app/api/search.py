@@ -130,6 +130,23 @@ async def search(
     """
     from app.services import get_search_service
 
+    if hasattr(top_k, "default"):
+        top_k = 10
+    if hasattr(version, "default"):
+        version = "latest"
+    if hasattr(lang, "default"):
+        lang = None
+    if hasattr(type, "default"):
+        type = None
+    if hasattr(rerank, "default"):
+        rerank = None
+    if hasattr(hybrid, "default"):
+        hybrid = None
+    if hasattr(clean, "default"):
+        clean = None
+    if hasattr(repo_filter, "default"):
+        repo_filter = None
+
     t_total_start = time.perf_counter()
     timings: dict = {}
 

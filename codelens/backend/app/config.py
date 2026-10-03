@@ -40,7 +40,7 @@ class Settings(BaseSettings):
     # ──────────────────────────── Retrieval pipeline toggles ───────
     use_bm25: bool = True         # enable BM25 sparse retrieval
     use_hybrid: bool = True       # fuse BM25 + dense with RRF
-    use_rerank: bool = True       # cross-encoder reranker
+    use_rerank: bool = False      # cross-encoder reranker (disabled by default on 512MB RAM free-tier)
     use_query_clean: bool = True  # query normalization / cleaning
     use_doc_normalize: bool = True  # document normalization
     use_second_pass: bool = False  # keyword expansion second pass

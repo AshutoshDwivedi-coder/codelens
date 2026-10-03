@@ -292,21 +292,14 @@ class SearchService:
         timings["query_clean_ms"] = round((time.perf_counter() - t0) * 1000, 1)
 
         t0 = time.perf_counter()
-        enc = _get_encoder()
+        q_vec = None
         try:
+            enc = _get_encoder()
             import numpy as np
             q_vec = np.asarray(enc.encode([cleaned], show_progress_bar=False)[0], dtype=np.float32)
         except Exception as _enc_err:
-            logger.warning("Encoder error: %s", _enc_err)
-            return {
-                "query": query,
-                "cleaned_query": cleaned,
-                "query_type": query_type,
-                "version": version,
-                "total_results": 0,
-                "results": [],
-                "config_used": cfg,
-            }
+            logger.warning("Encoder error (falling back to BM25): %s", _enc_err)
+            q_vec = None
         timings["embed_ms"] = round((time.perf_counter() - t0) * 1000, 1)
 
         if not search_versions:
@@ -343,7 +336,7 @@ class SearchService:
             t0 = time.perf_counter()
             dense_results: list = []
             try:
-                if dense_idx is not None:
+                if dense_idx is not None and q_vec is not None:
                     dense_results = dense_idx.search(q_vec, top_k=cfg["dense_top_k"])
             except Exception as exc:
                 logger.warning("Dense search failed for %s: %s", snap_ver, exc)
