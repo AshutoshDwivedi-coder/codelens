@@ -9,6 +9,12 @@ import logging
 import time
 from contextlib import asynccontextmanager
 
+import os
+# Prevent HuggingFace tokenizer parallelism warnings and deadlocks.
+# OMP threads = 1 avoids CPU thrashing on Render's single-core free tier.
+os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
+os.environ.setdefault("OMP_NUM_THREADS", "1")
+
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
