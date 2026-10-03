@@ -19,6 +19,8 @@ cd ..
 echo "Installing Python Dependencies..."
 cd backend
 pip install --upgrade pip
+# MUST install cpu version explicitly to prevent 2.5GB CUDA download which OOMs
+pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu
 pip install --no-cache-dir -r requirements.txt
 
 echo "Pre-downloading embedding models at build time..."

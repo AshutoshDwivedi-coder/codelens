@@ -75,7 +75,7 @@ class Settings(BaseSettings):
     rate_limit_per_minute: int = 120
 
     # ──────────────────────────── Batch embedding ──────────────────
-    embed_batch_size: int = 8
+    embed_batch_size: int = 2
     embed_max_length: int = 512    # bge-small max token length
 
     # ──────────────────────────── MTEB ─────────────────────────────
