@@ -177,8 +177,9 @@ def build_dense_index(
     chunks: list,                     # list of CodeChunk
     encoder,                          # PrePostPipelineEncoder
     cache: Optional[EmbeddingCache] = None,
-    batch_size: int = 64,
+    batch_size: int = 16,
     index_type: str = "flat",
+    progress_callback: Optional[Any] = None,
 ) -> tuple[DenseIndex, int, int]:
     """
     Embed *chunks* and build a DenseIndex.
@@ -215,20 +216,29 @@ def build_dense_index(
         to_embed_texts.append(text)
         to_embed_indices.append(i)
 
-    # Batch embed
+    # Batch embed with live progress updates
     if to_embed_texts:
-        logger.info("Embedding %d chunks (batch_size=%d)…", len(to_embed_texts), batch_size)
+        total = len(to_embed_texts)
+        logger.info("Embedding %d chunks (batch_size=%d)…", total, batch_size)
         t0 = time.perf_counter()
-        new_vecs = encoder.encode(
-            to_embed_texts,
-            prompt_type=None,  # already normalized
-            batch_size=batch_size,
-            show_progress_bar=True,
-        )
+        batches = []
+        for start_idx in range(0, total, batch_size):
+            end_idx = min(start_idx + batch_size, total)
+            batch = to_embed_texts[start_idx:end_idx]
+            if progress_callback:
+                progress_callback(f"Generating embeddings ({end_idx}/{total})…")
+            vecs = encoder.encode(
+                batch,
+                prompt_type=None,  # already normalized
+                batch_size=batch_size,
+                show_progress_bar=False,
+            )
+            batches.append(vecs)
+        new_vecs = np.vstack(batches)
         dt = time.perf_counter() - t0
         logger.info("Embedded %d chunks in %.1f s (%.0f chunks/s)",
-                    len(to_embed_texts), dt, len(to_embed_texts) / max(dt, 0.001))
-        n_embedded = len(to_embed_texts)
+                    total, dt, total / max(dt, 0.001))
+        n_embedded = total
 
         # Store in cache
         for j, (idx, vec) in enumerate(zip(to_embed_indices, new_vecs)):

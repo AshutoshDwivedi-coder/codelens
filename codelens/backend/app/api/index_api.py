@@ -41,7 +41,20 @@ def _load_jobs() -> dict:
     p = _jobs_file()
     if p.exists():
         try:
-            return json.loads(p.read_text())
+            data = json.loads(p.read_text())
+            modified = False
+            for jid, j in data.items():
+                if j.get("status") in ("pending", "running"):
+                    j["status"] = "error"
+                    j["progress"] = "Interrupted"
+                    j["error"] = "Indexing was interrupted by server reboot or memory limit. Please retry."
+                    modified = True
+            if modified:
+                try:
+                    p.write_text(json.dumps(data))
+                except Exception:
+                    pass
+            return data
         except Exception:
             pass
     return {}

@@ -84,8 +84,15 @@ def _l2_normalize(matrix: np.ndarray) -> np.ndarray:
 
 
 def _load_model(model_name: str) -> "SentenceTransformer":
-    """Load a SentenceTransformer model with trust_remote_code for Jina."""
+    """Load a SentenceTransformer model with single-thread and low memory footprint."""
     logger.info("Loading model: %s", model_name)
+    import gc
+    gc.collect()
+    try:
+        import torch
+        torch.set_num_threads(1)
+    except Exception:
+        pass
     t0 = time.perf_counter()
     model = SentenceTransformer(
         model_name,
@@ -103,35 +110,17 @@ class PrePostPipelineEncoder:
     """
     MTEB-compatible encoder that applies pre- and post-processing around
     a base SentenceTransformer model.
-
-    Parameters
-    ----------
-    model_name:
-        HuggingFace model ID for the primary embedding model.
-    secondary_model_name:
-        Optional second model; its embeddings are concatenated with
-        ``secondary_weight`` to the primary embeddings.
-    secondary_weight:
-        Weight in [0, 1] applied before concatenation (primary gets 1.0).
-    use_query_clean:
-        Apply query cleaning on the query side.
-    use_doc_normalize:
-        Apply document normalisation on the document side.
-    batch_size:
-        Embedding batch size.
-    max_length:
-        Token length cap for the encoder.
     """
 
     def __init__(
         self,
-        model_name: str = "jinaai/jina-embeddings-v2-base-code",
+        model_name: str = "sentence-transformers/all-MiniLM-L6-v2",
         secondary_model_name: Optional[str] = None,
         secondary_weight: float = 0.3,
         use_query_clean: bool = True,
         use_doc_normalize: bool = True,
-        batch_size: int = 64,
-        max_length: int = 8192,
+        batch_size: int = 16,
+        max_length: int = 512,
     ) -> None:
         if not _ST_AVAILABLE:
             raise RuntimeError("sentence-transformers is required")
@@ -148,9 +137,9 @@ class PrePostPipelineEncoder:
         try:
             self._model = _load_model(model_name)
         except Exception as exc:
-            logger.warning("Primary model failed (%s), falling back to bge-small", exc)
-            self._model = _load_model("BAAI/bge-small-en-v1.5")
-            self.model_name = "BAAI/bge-small-en-v1.5"
+            logger.warning("Primary model failed (%s), falling back to all-MiniLM-L6-v2", exc)
+            self._model = _load_model("sentence-transformers/all-MiniLM-L6-v2")
+            self.model_name = "sentence-transformers/all-MiniLM-L6-v2"
 
         # Optional secondary model
         self._secondary_model: Optional["SentenceTransformer"] = None
@@ -188,30 +177,52 @@ class PrePostPipelineEncoder:
         self,
         texts: list[str],
         batch_size: int,
-        show_progress_bar: bool = True,
+        show_progress_bar: bool = False,
         **kwargs: Any,
     ) -> np.ndarray:
         """
         Encode *texts* with the primary model and optionally fuse with the
         secondary model's embeddings.
         """
-        embeddings: np.ndarray = self._model.encode(
-            texts,
-            batch_size=batch_size,
-            show_progress_bar=show_progress_bar,
-            normalize_embeddings=False,  # we do it ourselves
-            **kwargs,
-        )
-
-        if self._secondary_model is not None:
-            sec_emb: np.ndarray = self._secondary_model.encode(
+        import gc
+        try:
+            import torch
+            with torch.inference_mode():
+                embeddings: np.ndarray = self._model.encode(
+                    texts,
+                    batch_size=batch_size,
+                    show_progress_bar=show_progress_bar,
+                    normalize_embeddings=False,
+                    **kwargs,
+                )
+        except Exception:
+            embeddings = self._model.encode(
                 texts,
                 batch_size=batch_size,
                 show_progress_bar=show_progress_bar,
                 normalize_embeddings=False,
+                **kwargs,
             )
-            # Concatenate: [primary | secondary * weight]
-            # L2-normalise each part before concat for fair weighting
+        gc.collect()
+
+        if self._secondary_model is not None:
+            try:
+                import torch
+                with torch.inference_mode():
+                    sec_emb: np.ndarray = self._secondary_model.encode(
+                        texts,
+                        batch_size=batch_size,
+                        show_progress_bar=show_progress_bar,
+                        normalize_embeddings=False,
+                    )
+            except Exception:
+                sec_emb = self._secondary_model.encode(
+                    texts,
+                    batch_size=batch_size,
+                    show_progress_bar=show_progress_bar,
+                    normalize_embeddings=False,
+                )
+            gc.collect()
             primary_normed = _l2_normalize(embeddings.copy())
             secondary_normed = _l2_normalize(sec_emb.copy()) * self.secondary_weight
             embeddings = np.concatenate([primary_normed, secondary_normed], axis=1)

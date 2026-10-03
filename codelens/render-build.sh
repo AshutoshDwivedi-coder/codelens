@@ -23,18 +23,17 @@ pip install --upgrade pip
 pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu
 pip install --no-cache-dir -r requirements.txt
 
-echo "Pre-downloading embedding models at build time..."
-# Download models now so they are cached before any indexing request.
-# This avoids timeouts and OOM issues during the first indexing call.
+echo "Pre-downloading lightweight embedding models at build time..."
+export HF_HOME="$PWD/.hf_cache"
 OMP_NUM_THREADS=1 python -c "
 import os
 os.environ.setdefault('TOKENIZERS_PARALLELISM', 'false')
-print('Downloading bge-small-en-v1.5 ...')
+print('Downloading all-MiniLM-L6-v2 ...')
 from sentence_transformers import SentenceTransformer
-SentenceTransformer('BAAI/bge-small-en-v1.5')
+SentenceTransformer('sentence-transformers/all-MiniLM-L6-v2')
 print('Downloading cross-encoder/ms-marco-MiniLM-L-6-v2 ...')
 from sentence_transformers import CrossEncoder
 CrossEncoder('cross-encoder/ms-marco-MiniLM-L-6-v2')
-print('Models downloaded and cached.')
+print('Models pre-cached successfully.')
 "
 cd ..

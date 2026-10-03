@@ -28,7 +28,12 @@ export const IndexingModal: React.FC<IndexingModalProps> = ({
     try {
       const res = await startIndexing(targetPath);
       let job = await getIndexingStatus(res.job_id);
+      let pollCount = 0;
       while (job.status === 'pending' || job.status === 'running') {
+        pollCount++;
+        if (pollCount > 180) {
+          throw new Error('Indexing timed out after 3 minutes. The server might be constrained or restarting.');
+        }
         setMessage(job.progress || 'Indexing repository...');
         await new Promise((resolve) => window.setTimeout(resolve, 1000));
         job = await getIndexingStatus(res.job_id);
@@ -94,11 +99,11 @@ export const IndexingModal: React.FC<IndexingModalProps> = ({
               type="text"
               value={repoPath}
               onChange={(e) => setRepoPath(e.target.value)}
-              placeholder="e.g. ../sample_repo or relative/absolute path"
+              placeholder="e.g. https://github.com/owner/repo or relative/absolute path"
               className="w-full bg-[#0d1117] border border-[#30363d] rounded-xl px-4 py-2.5 text-xs text-gray-200 placeholder-gray-600 focus:outline-none focus:border-blue-500 font-mono"
             />
             <p className="text-[11px] text-gray-500">
-              Leave blank to trigger indexing on the default codebase directory.
+              Enter a GitHub URL or local path. Leave blank to index the default codebase.
             </p>
           </div>
 

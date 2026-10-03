@@ -85,18 +85,42 @@ def fetch_remote_readme(repo_url: str) -> Optional[Tuple[str, str, Path]]:
 
     cache_dir = base_dir / "cloned_repos" / f"{owner}_{repo}"
     cache_dir.mkdir(parents=True, exist_ok=True)
-    local_readme = cache_dir / "README.md"
 
-    # If already cached and fresh, read it
-    if local_readme.exists() and local_readme.stat().st_size > 0:
+    # 1. If already cached or cloned locally, find any README variant
+    local_readme = find_readme_file(cache_dir)
+    if local_readme and local_readme.exists() and local_readme.stat().st_size > 0:
         try:
             return local_readme.read_text(encoding="utf-8", errors="ignore"), repo_name, cache_dir
         except Exception:
             pass
 
-    # Try fetching raw content across common branch and file names
+    # 2. Try GitHub Contents API to find any readme file (e.g. README_BLOCKING.md)
+    try:
+        api_url = f"https://api.github.com/repos/{owner}/{repo}/contents"
+        req = urllib.request.Request(api_url, headers={"User-Agent": "CodeLens/1.0", "Accept": "application/vnd.github.v3+json"})
+        with urllib.request.urlopen(req, timeout=6) as response:
+            items = json.loads(response.read().decode("utf-8", errors="ignore"))
+            if isinstance(items, list):
+                readme_items = [it for it in items if isinstance(it, dict) and it.get("name", "").lower().startswith("readme") and it.get("download_url")]
+                if readme_items:
+                    # Pick best readme match
+                    dl_url = readme_items[0].get("download_url")
+                    dl_req = urllib.request.Request(dl_url, headers={"User-Agent": "CodeLens/1.0"})
+                    with urllib.request.urlopen(dl_req, timeout=8) as dl_resp:
+                        content = dl_resp.read().decode("utf-8", errors="ignore")
+                        if content and len(content.strip()) > 10:
+                            target_file = cache_dir / readme_items[0].get("name", "README.md")
+                            try:
+                                target_file.write_text(content, encoding="utf-8")
+                            except Exception:
+                                pass
+                            return content, repo_name, cache_dir
+    except Exception:
+        pass
+
+    # 3. Try fetching raw content across common branch and file names
     branches = ["main", "master", "HEAD", "develop"]
-    file_names = ["README.md", "readme.md", "README.rst", "README.txt", "README"]
+    file_names = ["README.md", "readme.md", "README_BLOCKING.md", "README.rst", "README.txt", "README"]
 
     for branch in branches:
         for fname in file_names:
@@ -107,12 +131,22 @@ def fetch_remote_readme(repo_url: str) -> Optional[Tuple[str, str, Path]]:
                     content = response.read().decode("utf-8", errors="ignore")
                     if content and len(content.strip()) > 10:
                         try:
-                            local_readme.write_text(content, encoding="utf-8")
+                            (cache_dir / fname).write_text(content, encoding="utf-8")
                         except Exception:
                             pass
                         return content, repo_name, cache_dir
             except Exception:
                 continue
+
+    # 4. Fallback: shallow clone to grab whatever README file exists
+    ok, _, cloned_dir = clone_git_repo(repo_url)
+    if ok and cloned_dir.exists():
+        found = find_readme_file(cloned_dir)
+        if found and found.exists():
+            try:
+                return found.read_text(encoding="utf-8", errors="ignore"), repo_name, cloned_dir
+            except Exception:
+                pass
 
     return None
 
@@ -186,12 +220,27 @@ def resolve_repo_dir(repo_path: Optional[str] = None) -> Tuple[Path, Optional[st
 
     # 1. Check if remote Git/GitHub URL
     if is_remote_git_url(clean_path):
+        parsed = parse_github_owner_repo(clean_path)
+        if parsed:
+            owner, repo = parsed
+            existing_dir = base_dir / "cloned_repos" / f"{owner}_{repo}"
+            if existing_dir.exists() and (existing_dir / ".git").exists():
+                local_readme = find_readme_file(existing_dir)
+                content = local_readme.read_text(encoding="utf-8", errors="replace") if local_readme else None
+                return existing_dir, content, f"{owner}/{repo}"
+
         remote_data = fetch_remote_readme(clean_path)
         if remote_data:
             content, repo_name, local_dir = remote_data
             return local_dir, content, repo_name
-        # Fallback if fetch failed: try creating a directory
-        parsed = parse_github_owner_repo(clean_path)
+
+        # Fallback if fetch failed: try shallow cloning
+        ok, _, fallback_dir = clone_git_repo(clean_path)
+        if ok and fallback_dir.exists():
+            local_readme = find_readme_file(fallback_dir)
+            content = local_readme.read_text(encoding="utf-8", errors="replace") if local_readme else None
+            return fallback_dir, content, f"{owner}/{repo}" if parsed else fallback_dir.name
+
         owner, repo = parsed if parsed else ("github", "repo")
         fallback_dir = base_dir / "cloned_repos" / f"{owner}_{repo}"
         fallback_dir.mkdir(parents=True, exist_ok=True)

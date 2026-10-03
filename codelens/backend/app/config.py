@@ -25,15 +25,14 @@ class Settings(BaseSettings):
     results_dir: Path = base_dir / "results"
 
     # ──────────────────────────── Models ───────────────────────────
-    # bge-small-en-v1.5 is ~90 MB — fits in Render's 512 MB free-tier RAM.
-    # jinaai/jina-embeddings-v2-base-code is ~500 MB and causes OOM crashes.
-    # Override via EMBED_MODEL env var if you have more RAM available.
-    embed_model: str = "BAAI/bge-small-en-v1.5"
+    # all-MiniLM-L6-v2 is ~80 MB — fits comfortably in Render's 512 MB free-tier RAM.
+    # bge-small-en-v1.5 is ~134 MB and causes OOM crashes on free-tier Render.
+    embed_model: str = "sentence-transformers/all-MiniLM-L6-v2"
     # Fallback when primary is unavailable / too slow
-    embed_model_fallback: str = "BAAI/bge-small-en-v1.5"
+    embed_model_fallback: str = "sentence-transformers/all-MiniLM-L6-v2"
     # Cross-encoder reranker
     reranker_model: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"
-    # Embedding dimension — must match the model (bge-small-en-v1.5 = 384)
+    # Embedding dimension — must match the model (all-MiniLM-L6-v2 = 384)
     embed_dim: int = 384
 
     # ──────────────────────────── Retrieval pipeline toggles ───────

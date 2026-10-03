@@ -10,10 +10,17 @@ import time
 from contextlib import asynccontextmanager
 
 import os
+from pathlib import Path
+
 # Prevent HuggingFace tokenizer parallelism warnings and deadlocks.
 # OMP threads = 1 avoids CPU thrashing on Render's single-core free tier.
 os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
 os.environ.setdefault("OMP_NUM_THREADS", "1")
+
+# Store HuggingFace model cache in project directory so build-time cache persists to runtime
+_hf_dir = Path(__file__).resolve().parent.parent / ".hf_cache"
+_hf_dir.mkdir(parents=True, exist_ok=True)
+os.environ.setdefault("HF_HOME", str(_hf_dir))
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware

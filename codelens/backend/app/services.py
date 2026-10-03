@@ -546,6 +546,7 @@ def build_index_for_repo(
     cache_path = settings.indexes_dir / "embed_cache.pkl"
     emb_cache = EmbeddingCache(cache_path)
 
+    _progress("Preparing embedding model…")
     encoder = _get_encoder()
     t_build_start = time.time()
 
@@ -556,6 +557,7 @@ def build_index_for_repo(
         all_chunks, encoder, cache=emb_cache,
         batch_size=settings.embed_batch_size,
         index_type=settings.faiss_index_type,
+        progress_callback=_progress,
     )
     dense_idx.save(snap_dir)
     emb_cache.save()

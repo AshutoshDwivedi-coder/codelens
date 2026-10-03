@@ -34,8 +34,8 @@ tree-sitter-languages>=1.10.0    # pre-built grammars for 40+ languages
 redis>=5.0.0
 cachetools>=5.3.0
 
-# ── MTEB evaluation ────────────────────────────────────────────────────────
-mteb>=1.14.0
+# ── MTEB evaluation (optional, for benchmarking only) ──────────────────────
+# mteb>=1.14.0
 
 # ── Utilities ─────────────────────────────────────────────────────────────
 numpy>=1.26.0
