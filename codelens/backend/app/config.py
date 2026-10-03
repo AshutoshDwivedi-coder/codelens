@@ -73,7 +73,7 @@ class Settings(BaseSettings):
     rate_limit_per_minute: int = 120
 
     # ──────────────────────────── Batch embedding ──────────────────
-    embed_batch_size: int = 64
+    embed_batch_size: int = 8
     embed_max_length: int = 8192   # jina-v2 supports long context
 
     # ──────────────────────────── MTEB ─────────────────────────────
