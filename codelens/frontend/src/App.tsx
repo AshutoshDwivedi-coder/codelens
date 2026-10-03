@@ -394,7 +394,7 @@ export function App() {
                   if (resolvedPath) { setIndexTargetPath(resolvedPath); setAutoStartIndexing(true); }
                 }
                 setIsIndexModalOpen(true);
-              }
+              }}
               className="px-3 py-1.5 rounded-lg bg-red-500/20 hover:bg-red-500/30 border border-red-500/30 text-red-200 text-xs font-semibold"
             >
               {error.includes('not indexed') ? 'Index Now →' : 'Open Index Repository'}
