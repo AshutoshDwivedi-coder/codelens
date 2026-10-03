@@ -10,21 +10,61 @@ GET  /api/snippet/{id}   – get a specific chunk
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import time
 import uuid
+from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException, Path, Query
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Path as FPath, Query
 from pydantic import BaseModel
 
 logger = logging.getLogger("codelens.api.index")
 
 router = APIRouter()
 
-# ──────────────────────────── Job state store ─────────────────────────────
+# ──────────────────────────── Job state store (disk-backed) ──────────────────
 
+def _jobs_file() -> Path:
+    """Return the path to the on-disk jobs JSON, creating its directory if needed."""
+    try:
+        from app.config import settings
+        p = settings.indexes_dir / "_jobs.json"
+    except Exception:
+        p = Path("/tmp/_codelens_jobs.json")
+    p.parent.mkdir(parents=True, exist_ok=True)
+    return p
+
+
+def _load_jobs() -> dict:
+    p = _jobs_file()
+    if p.exists():
+        try:
+            return json.loads(p.read_text())
+        except Exception:
+            pass
+    return {}
+
+
+def _save_jobs(jobs: dict) -> None:
+    try:
+        _jobs_file().write_text(json.dumps(jobs))
+    except Exception as exc:
+        logger.warning("Could not persist jobs: %s", exc)
+
+
+# In-memory mirror (populated lazily from disk on first access)
 _jobs: dict[str, dict] = {}
+_jobs_loaded = False
+
+
+def _get_jobs() -> dict:
+    global _jobs, _jobs_loaded
+    if not _jobs_loaded:
+        _jobs = _load_jobs()
+        _jobs_loaded = True
+    return _jobs
 
 
 class IndexRequest(BaseModel):
@@ -62,13 +102,15 @@ async def trigger_index(
 ):
     """Trigger an async indexing job for a repository commit."""
     job_id = str(uuid.uuid4())[:8]
-    _jobs[job_id] = {
+    jobs = _get_jobs()
+    jobs[job_id] = {
         "status": "pending",
         "progress": "Queued",
         "started_at": time.time(),
         "error": None,
         "manifest": None,
     }
+    _save_jobs(jobs)
     background_tasks.add_task(_run_index_job, job_id, req)
     return {"job_id": job_id, "status": "pending"}
 
@@ -77,8 +119,10 @@ async def _run_index_job(job_id: str, req: IndexRequest) -> None:
     """Background indexing task."""
     from app.services import build_index_for_repo
 
-    _jobs[job_id]["status"] = "running"
-    _jobs[job_id]["progress"] = "Starting indexer…"
+    jobs = _get_jobs()
+    jobs[job_id]["status"] = "running"
+    jobs[job_id]["progress"] = "Starting indexer…"
+    _save_jobs(jobs)
     t_start = time.time()
 
     try:
@@ -101,28 +145,37 @@ async def _run_index_job(job_id: str, req: IndexRequest) -> None:
                 progress_callback=lambda msg: _update_progress(job_id, msg),
             ),
         )
-        _jobs[job_id]["status"] = "done"
-        _jobs[job_id]["progress"] = "Index complete"
-        _jobs[job_id]["manifest"] = manifest
+        jobs = _get_jobs()
+        jobs[job_id]["status"] = "done"
+        jobs[job_id]["progress"] = "Index complete"
+        jobs[job_id]["manifest"] = manifest
+        _save_jobs(jobs)
     except Exception as exc:
         logger.exception("Indexing job %s failed: %s", job_id, exc)
-        _jobs[job_id]["status"] = "error"
-        _jobs[job_id]["progress"] = "Failed"
-        _jobs[job_id]["error"] = str(exc)
+        jobs = _get_jobs()
+        jobs[job_id]["status"] = "error"
+        jobs[job_id]["progress"] = "Failed"
+        jobs[job_id]["error"] = str(exc)
+        _save_jobs(jobs)
 
-    _jobs[job_id]["elapsed_seconds"] = round(time.time() - t_start, 1)
+    jobs = _get_jobs()
+    jobs[job_id]["elapsed_seconds"] = round(time.time() - t_start, 1)
+    _save_jobs(jobs)
 
 
 def _update_progress(job_id: str, msg: str) -> None:
-    if job_id in _jobs:
-        _jobs[job_id]["progress"] = msg
+    jobs = _get_jobs()
+    if job_id in jobs:
+        jobs[job_id]["progress"] = msg
+        _save_jobs(jobs)
         logger.info("[Job %s] %s", job_id, msg)
 
 
 @router.get("/index/status", response_model=IndexStatusResponse)
 async def index_status(job_id: str = Query(..., description="Job ID from POST /api/index")):
     """Get the status of an indexing job."""
-    job = _jobs.get(job_id)
+    jobs = _get_jobs()
+    job = jobs.get(job_id)
     if job is None:
         raise HTTPException(status_code=404, detail=f"Job {job_id!r} not found")
     return IndexStatusResponse(
@@ -157,7 +210,7 @@ async def list_versions():
 
 
 @router.get("/lineage/{lineage_id}")
-async def get_lineage(lineage_id: str = Path(..., description="Lineage ID")):
+async def get_lineage(lineage_id: str = FPath(..., description="Lineage ID")):
     """Get all versions of a snippet across indexed commits."""
     from app.config import settings
     from pipeline.lineage import get_lineage_history, diff_versions
@@ -186,7 +239,7 @@ async def get_lineage(lineage_id: str = Path(..., description="Lineage ID")):
 
 
 @router.get("/snippet/{chunk_id}")
-async def get_snippet(chunk_id: str = Path(..., description="Chunk ID")):
+async def get_snippet(chunk_id: str = FPath(..., description="Chunk ID")):
     """Retrieve a specific code chunk by ID."""
     from app.services import get_search_service
 
@@ -243,7 +296,6 @@ async def get_lineage_by_path(
     from app.config import settings
     from pipeline.lineage import get_lineage_history
 
-    # Try common symbol or empty symbol lineage hash
     indexes_dir = settings.indexes_dir
     history = []
     if indexes_dir.exists():
@@ -300,7 +352,6 @@ async def list_repos():
     repos = []
     seen_names: set[str] = set()
 
-    # Discover repos from index snapshots (manifest.json in each snapshot dir).
     indexes_dir = settings.indexes_dir
     if indexes_dir.exists():
         indexed_entries = []
@@ -363,10 +414,9 @@ async def health():
         "version": "1.0.0",
         "indexed_repositories": len(latest_by_repo),
         "total_chunks": total_chunks,
-        "model_name": "MiniLM-L6-v2",
+        "model_name": "bge-small-en-v1.5",
         "bm25_active": True,
         "index_loaded": svc is not None,
         "cache_backend": cache.backend_name if cache else "none",
         "cache_stats": cache.stats() if cache else {},
     }
-

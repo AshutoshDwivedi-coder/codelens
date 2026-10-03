@@ -25,14 +25,16 @@ class Settings(BaseSettings):
     results_dir: Path = base_dir / "results"
 
     # ──────────────────────────── Models ───────────────────────────
-    # Primary code embedding model (dense retrieval)
-    embed_model: str = "jinaai/jina-embeddings-v2-base-code"
+    # bge-small-en-v1.5 is ~90 MB — fits in Render's 512 MB free-tier RAM.
+    # jinaai/jina-embeddings-v2-base-code is ~500 MB and causes OOM crashes.
+    # Override via EMBED_MODEL env var if you have more RAM available.
+    embed_model: str = "BAAI/bge-small-en-v1.5"
     # Fallback when primary is unavailable / too slow
     embed_model_fallback: str = "BAAI/bge-small-en-v1.5"
     # Cross-encoder reranker
     reranker_model: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"
-    # Embedding dimension (set automatically at runtime)
-    embed_dim: int = 768
+    # Embedding dimension — must match the model (bge-small-en-v1.5 = 384)
+    embed_dim: int = 384
 
     # ──────────────────────────── Retrieval pipeline toggles ───────
     use_bm25: bool = True         # enable BM25 sparse retrieval
@@ -74,7 +76,7 @@ class Settings(BaseSettings):
 
     # ──────────────────────────── Batch embedding ──────────────────
     embed_batch_size: int = 8
-    embed_max_length: int = 8192   # jina-v2 supports long context
+    embed_max_length: int = 512    # bge-small max token length
 
     # ──────────────────────────── MTEB ─────────────────────────────
     mteb_tasks: list[str] = ["AppsRetrieval"]
