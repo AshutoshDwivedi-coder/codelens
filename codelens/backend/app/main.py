@@ -22,6 +22,18 @@ _hf_dir = Path(__file__).resolve().parent.parent / ".hf_cache"
 _hf_dir.mkdir(parents=True, exist_ok=True)
 os.environ.setdefault("HF_HOME", str(_hf_dir))
 
+# On Render free tier the source directory is ephemeral / read-only at runtime.
+# Default INDEXES_DIR and CLONED_REPOS_DIR to /tmp (always writable) unless
+# the operator explicitly sets a persistent-disk path.
+if not os.environ.get("INDEXES_DIR"):
+    _idx = Path("/tmp/codelens_indexes")
+    _idx.mkdir(parents=True, exist_ok=True)
+    os.environ["INDEXES_DIR"] = str(_idx)
+if not os.environ.get("CLONED_REPOS_DIR"):
+    _repos = Path("/tmp/codelens_repos")
+    _repos.mkdir(parents=True, exist_ok=True)
+    os.environ["CLONED_REPOS_DIR"] = str(_repos)
+
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware

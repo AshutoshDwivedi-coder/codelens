@@ -62,6 +62,24 @@ EXTENSION_TO_LANG: dict[str, str] = {
     ".cc": "cpp",
     ".rb": "ruby",
     ".php": "php",
+    # Notebook support — cells extracted as Python before chunking
+    ".ipynb": "python",
+    # Markup / prose — line-based chunking
+    ".md": "markdown",
+    ".markdown": "markdown",
+    ".txt": "text",
+    ".rst": "text",
+    # Shell / config
+    ".sh": "bash",
+    ".bash": "bash",
+    ".yaml": "yaml",
+    ".yml": "yaml",
+    ".toml": "toml",
+    # Query
+    ".sql": "sql",
+    # Data science
+    ".r": "r",
+    ".R": "r",
 }
 
 # Node types that represent function-level chunks per language
@@ -327,7 +345,42 @@ def _chunk_by_lines(
     return chunks
 
 
+# ──────────────────────────── Notebook extractor ───────────────────────────
+
+
+def _extract_notebook_source(source: str, file_path: str) -> str:
+    """
+    Extract Python source from a Jupyter notebook (.ipynb) JSON.
+
+    Concatenates code and markdown cells so the result can be chunked like
+    a plain .py file. Returns raw source unchanged on parse failure.
+    """
+    import json as _json
+    try:
+        nb = _json.loads(source)
+        cells = nb.get("cells", [])
+        parts: list[str] = []
+        for idx, cell in enumerate(cells):
+            ctype = cell.get("cell_type", "")
+            src = cell.get("source", [])
+            if isinstance(src, list):
+                src = "".join(src)
+            if not src.strip():
+                continue
+            if ctype == "code":
+                parts.append(f"# --- Cell {idx + 1} ---\n" + src)
+            elif ctype in ("markdown", "raw"):
+                commented = "\n".join("# " + ln for ln in src.splitlines())
+                parts.append(f"# --- Markdown Cell {idx + 1} ---\n" + commented)
+        return "\n\n".join(parts) if parts else source
+    except Exception:
+        return source
+
+
 # ──────────────────────────── Public API ───────────────────────────────────
+
+# Languages with no tree-sitter grammar — always use line-based chunking
+_NON_TS_LANGS = frozenset({"markdown", "text", "bash", "yaml", "toml", "sql", "r", "unknown"})
 
 
 def chunk_file(
@@ -354,8 +407,13 @@ def chunk_file(
         ext = Path(file_path).suffix.lower()
         language = EXTENSION_TO_LANG.get(ext, "unknown")
 
-    # Try AST chunking
-    if _TS_AVAILABLE and language != "unknown":
+    # Jupyter notebook: extract Python source from cells first
+    if file_path.endswith(".ipynb"):
+        source = _extract_notebook_source(source, file_path)
+        language = "python"
+
+    # Try AST chunking (skip for prose/config/data-science languages)
+    if _TS_AVAILABLE and language not in _NON_TS_LANGS:
         chunks = _chunk_with_treesitter(
             source, file_path, language,
             max_chunk_tokens=max_chunk_tokens,
@@ -365,7 +423,7 @@ def chunk_file(
             return chunks
         logger.debug("Tree-sitter returned 0 chunks for %s; using line fallback", file_path)
 
-    # Fallback
+    # Fallback: line-based chunking (works for all langs including prose/config)
     return _chunk_by_lines(source, file_path, language)
 
 

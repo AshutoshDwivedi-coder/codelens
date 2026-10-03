@@ -210,16 +210,16 @@ export function App() {
       setTimingMs(res.timing_ms);
       setTotalCandidates(res.total_candidates);
       if (res.error) {
+        const selectedId = selectedRepos[0];
+        const resolvedPath = repoPaths[selectedId] || selectedId || '';
         setError(
           res.error.includes('not indexed')
-            ? `“${repoFilterString || 'Selected repository'}” is not indexed yet. Open Index Repository, index it, then click a recommended question again.`
+            ? `"${repoFilterString || 'Selected repository'}" is not indexed yet. Click "Index Now" — search will run automatically after indexing.`
             : res.error
         );
         if (res.error.includes('not indexed')) {
           setSearchAfterIndex(q);
-          const selectedId = selectedRepos[0];
-          const path = repoPaths[selectedId] || selectedId;
-          setIndexTargetPath(path);
+          setIndexTargetPath(resolvedPath);
           setAutoStartIndexing(true);
           setIsIndexModalOpen(true);
         }
@@ -343,7 +343,18 @@ export function App() {
             isLoading={isReadmeLoading}
             onSelectQuestion={(q) => {
               setQuery(q);
-              handleSearch(q);
+              // If nothing indexed yet, open the indexing modal first
+              const nothingIndexed = availableRepos.filter((r) => r.source === 'indexed').length === 0;
+              if (nothingIndexed && selectedRepos.length > 0) {
+                const sid = selectedRepos[0];
+                const rp = repoPaths[sid] || sid || '';
+                setSearchAfterIndex(q);
+                setIndexTargetPath(rp);
+                setAutoStartIndexing(!!rp);
+                setIsIndexModalOpen(true);
+              } else {
+                handleSearch(q);
+              }
             }}
           />
         </div>
@@ -376,10 +387,17 @@ export function App() {
             <span>{error}</span>
             <button
               type="button"
-              onClick={() => setIsIndexModalOpen(true)}
+              onClick={() => {
+                if (error.includes('not indexed') || error.includes('No codebase')) {
+                  const selectedId = selectedRepos[0];
+                  const resolvedPath = repoPaths[selectedId] || selectedId || '';
+                  if (resolvedPath) { setIndexTargetPath(resolvedPath); setAutoStartIndexing(true); }
+                }
+                setIsIndexModalOpen(true);
+              }
               className="px-3 py-1.5 rounded-lg bg-red-500/20 hover:bg-red-500/30 border border-red-500/30 text-red-200 text-xs font-semibold"
             >
-              Open Index Repository
+              {error.includes('not indexed') ? 'Index Now →' : 'Open Index Repository'}
             </button>
           </div>
         )}

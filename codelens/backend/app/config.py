@@ -20,8 +20,10 @@ class Settings(BaseSettings):
     )
 
     # ──────────────────────────── Paths ────────────────────────────
-    base_dir: Path = Path(__file__).parent.parent.parent
-    indexes_dir: Path = base_dir / "indexes"
+    # base_dir is the backend/ directory (parent of backend/app/)
+    base_dir: Path = Path(__file__).parent.parent
+    # Allow override via INDEXES_DIR env var (e.g. Render persistent disk: /var/data/indexes)
+    indexes_dir: Path = Path(os.environ.get("INDEXES_DIR", "") or (Path(__file__).parent.parent / "indexes"))
     results_dir: Path = base_dir / "results"
 
     # ──────────────────────────── Models ───────────────────────────

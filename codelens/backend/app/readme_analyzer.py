@@ -83,7 +83,9 @@ def fetch_remote_readme(repo_url: str) -> Optional[Tuple[str, str, Path]]:
     except Exception:
         base_dir = Path(__file__).resolve().parent.parent.parent
 
-    cache_dir = base_dir / "cloned_repos" / f"{owner}_{repo}"
+    # Respect CLONED_REPOS_DIR env var (set to /tmp/codelens_repos on Render)
+    _cloned_repos_base = Path(os.environ.get("CLONED_REPOS_DIR") or (base_dir / "cloned_repos"))
+    cache_dir = _cloned_repos_base / f"{owner}_{repo}"
     cache_dir.mkdir(parents=True, exist_ok=True)
 
     # 1. If already cached or cloned locally, find any README variant
@@ -163,9 +165,10 @@ def clone_git_repo(repo_url: str) -> Tuple[bool, str, Path]:
         from app.config import settings
         base_dir = settings.base_dir
     except Exception:
-        base_dir = Path(__file__).resolve().parent.parent.parent
+        base_dir = Path(__file__).resolve().parent.parent
 
-    target_dir = base_dir / "cloned_repos" / f"{owner}_{repo}"
+    _cloned_repos_base = Path(os.environ.get("CLONED_REPOS_DIR") or (base_dir / "cloned_repos"))
+    target_dir = _cloned_repos_base / f"{owner}_{repo}"
     if (target_dir / ".git").exists():
         return True, f"Repository already cloned at {target_dir}", target_dir
 
@@ -221,9 +224,10 @@ def resolve_repo_dir(repo_path: Optional[str] = None) -> Tuple[Path, Optional[st
     # 1. Check if remote Git/GitHub URL
     if is_remote_git_url(clean_path):
         parsed = parse_github_owner_repo(clean_path)
+        _cloned_repos_base = Path(os.environ.get("CLONED_REPOS_DIR") or (base_dir / "cloned_repos"))
         if parsed:
             owner, repo = parsed
-            existing_dir = base_dir / "cloned_repos" / f"{owner}_{repo}"
+            existing_dir = _cloned_repos_base / f"{owner}_{repo}"
             if existing_dir.exists() and (existing_dir / ".git").exists():
                 local_readme = find_readme_file(existing_dir)
                 content = local_readme.read_text(encoding="utf-8", errors="replace") if local_readme else None
@@ -242,7 +246,7 @@ def resolve_repo_dir(repo_path: Optional[str] = None) -> Tuple[Path, Optional[st
             return fallback_dir, content, f"{owner}/{repo}" if parsed else fallback_dir.name
 
         owner, repo = parsed if parsed else ("github", "repo")
-        fallback_dir = base_dir / "cloned_repos" / f"{owner}_{repo}"
+        fallback_dir = _cloned_repos_base / f"{owner}_{repo}"
         fallback_dir.mkdir(parents=True, exist_ok=True)
         return fallback_dir, None, f"{owner}/{repo}"
 
