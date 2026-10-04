@@ -171,11 +171,10 @@ The response includes a `job_id`. Poll `GET /api/index/status?job_id=<job_id>` u
 
 ## Live Demo
 
-Deployment URLs have not been confirmed yet, so these are placeholders rather than live links:
+live Demo : https://codelens-app.onrender.com
 
-- Frontend: [Vercel URL — add after deployment]
-- Backend API: [Render URL — add after deployment]
-- API Documentation: [Render URL — add after deployment]/docs
+## Video Explaination 
+link : https://youtu.be/NUr8z0aA774
 
 Once deployed, the application supports adding a public GitHub repository by URL, cloning and indexing it, natural-language and keyword code search, repository and version selection, and README-based repository insights.
 
