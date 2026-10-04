@@ -1,3 +1,3 @@
 ## Demo Video
 
-[▶️ Watch Demo Video](https://youtu.be/NUr8Z0aA774)
+[▶️ Watch Demo Video](https://youtu.be/NUr8z0aA774?si=tsLbMBtKkRgrpwCR)
